@@ -38,15 +38,6 @@ class Chef
           result
         end
 
-        def is_binary?(path)
-          ::File.open(path) do |file|
-
-            buff = file.read(Chef::Config[:diff_filesize_threshold])
-            buff = "" if buff.nil?
-            return buff !~ /^[\r[:print:]]*$/
-          end
-        end
-
         def diff_current(temp_path)
           suppress_resource_reporting = false
 

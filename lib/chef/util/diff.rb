@@ -42,6 +42,7 @@
 
 require 'diff/lcs'
 require 'diff/lcs/hunk'
+require 'chef/mixin/is_binary'
 
 class Chef
   class Util
@@ -49,6 +50,8 @@ class Chef
       # @todo: to_a, to_s, to_json, inspect defs, accessors for @diff and @error
       # @todo: move coercion to UTF-8 into to_json
       # @todo: replace shellout to diff -u with diff-lcs gem
+
+      include Chef::Mixin::IsBinary
 
       def for_output
         # formatted output to a terminal uses arrays of strings and returns error strings
@@ -82,7 +85,7 @@ class Chef
           end
         end
       end
-      
+
       # produces a unified-output-format diff with 3 lines of context
       # ChefFS uses udiff() directly
       def udiff(old_file, new_file)
@@ -135,8 +138,8 @@ class Chef
         end
 
         # MacOSX(BSD?) diff will *sometimes* happily spit out nasty binary diffs
-        return "(current file is binary, diff output suppressed)" if is_binary?(old_file)
-        return "(new content is binary, diff output suppressed)" if is_binary?(new_file)
+        return "(current file is binary, diff output suppressed)" if is_binary?(old_file, nil)
+        return "(new content is binary, diff output suppressed)" if is_binary?(new_file, nil)
 
         begin
           Chef::Log.debug("running: diff -u #{old_file} #{new_file}")
@@ -158,20 +161,6 @@ class Chef
           end
         else
           return "(no diff)"
-        end
-      end
-
-      def is_binary?(path)
-        File.open(path) do |file|
-          # XXX: this slurps into RAM, but we should have already checked our diff has a reasonable size
-          buff = file.read
-          buff = "" if buff.nil?
-          begin
-            return buff !~ /\A[\s[:print:]]*\z/m
-          rescue ArgumentError => e
-            return true if e.message =~ /invalid byte sequence/
-            raise
-          end
         end
       end
 

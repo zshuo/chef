@@ -27,6 +27,7 @@ require 'chef/scan_access_control'
 require 'chef/mixin/checksum'
 require 'chef/mixin/shell_out'
 require 'chef/mixin/file_class'
+require 'chef/mixin/is_binary'
 require 'chef/util/backup'
 require 'chef/util/diff'
 require 'chef/deprecation/provider/file'
@@ -51,6 +52,7 @@ class Chef
       include Chef::Mixin::ShellOut
       include Chef::Util::Selinux
       include Chef::Mixin::FileClass
+      include Chef::Mixin::IsBinary
 
       extend Chef::Deprecation::Warnings
       include Chef::Deprecation::Provider::File
@@ -118,6 +120,7 @@ class Chef
       def action_create
         do_unlink
         do_create_file
+        do_fix_line_endings
         do_contents_changes
         do_acl_changes
         do_selinux
@@ -323,6 +326,33 @@ class Chef
         end
       end
 
+      def bad_file_endings_on_windows?
+        # someone on a unix workstation uploaded a file to deploy to a windows server
+        Chef::Platform.windows? && line_endings(tempfile, 65536).include?(:unix)
+      end
+
+      def bad_file_endings_on_unix?
+        # someone on a windows workstation uploaded a file to deploy to a unix server
+        !Chef::Platform.windows? && line_endings(tempfile, 65536).include?(:windows)
+      end
+
+      def do_fix_line_endings
+        # a nil tempfile is okay, means the resource has no content or no new content
+        unless tempfile.nil? || is_binary?(tempfile)
+          if bad_file_endings_on_windows? || bad_file_endings_on_unix?
+            # roll our own line ending conversion, because not-binmode on unix does not do any conversion
+            fixed_tempfile = Tempfile.open("chef-file-fixed", "wb+")
+            File.readlines(tempfile.path).each do |line|
+              line.chomp!
+              fixed_tempfile.puts line
+            end
+            fixed_tempfile.close
+            # deploy our fixed tempfile instead of the one from the content provider
+            @tempfile = fixed_tempfile
+          end
+        end
+      end
+
       # do_contents_changes needs to know if do_create_file created a file or not
       def file_created?
         @file_created == true
@@ -396,7 +426,8 @@ class Chef
       end
 
       def tempfile
-        content.tempfile
+        # we can update the tempfile if we modify the line endings
+        @tempfile ||= content.tempfile
       end
 
       def short_cksum(checksum)
