@@ -309,5 +309,10 @@ class Chef
       end
     end
 
+    class RemoteFileChecksumMismatch < RuntimeError
+      def initialize(downloaded_checksum, resource_checksum)
+        super "checksum of downloaded file (#{downloaded_checksum}) does not match checksum on resource (#{resource_checksum})."
+      end
+    end
   end
 end

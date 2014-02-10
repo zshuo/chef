@@ -27,7 +27,15 @@ class Chef
     class RemoteFile
       class Content < Chef::FileContentManagement::ContentBase
 
+        attr_accessor :raw_file
+
+        include Chef::Mixin::Checksum
+
         private
+
+        def downloaded_checksum
+          @downloaded_checksum ||= checksum(raw_file.path)
+        end
 
         def file_for_provider
           Chef::Log.debug("#{@new_resource} checking for changes")
@@ -36,7 +44,10 @@ class Chef
             Chef::Log.debug("#{@new_resource} checksum matches target checksum (#{@new_resource.checksum}) - not updating")
           else
             sources = @new_resource.source
-            raw_file = try_multiple_sources(sources)
+            try_multiple_sources(sources)
+            if raw_file && @new_resource.checksum && downloaded_checksum !=  @new_resource.checksum
+              raise Chef::Exceptions::RemoteFileChecksumMismatch.new(downloaded_checksum, @new_resource.checksum)
+            end
           end
           raw_file
         end
@@ -47,7 +58,7 @@ class Chef
           source = sources.shift
           begin
             uri = URI.parse(source)
-            raw_file = grab_file_from_uri(uri)
+            grab_file_from_uri(uri)
           rescue SocketError, Errno::ECONNREFUSED, Errno::ENOENT, Errno::EACCES, Timeout::Error, Net::HTTPFatalError, Net::FTPError => e
             Chef::Log.warn("#{@new_resource} cannot be downloaded from #{source}: #{e.to_s}")
             if source = sources.shift
@@ -57,12 +68,11 @@ class Chef
               raise e
             end
           end
-          raw_file
         end
 
         # Given a source uri, return a Tempfile, or a File that acts like a Tempfile (close! method)
         def grab_file_from_uri(uri)
-          Chef::Provider::RemoteFile::Fetcher.for_resource(uri, @new_resource, @current_resource).fetch
+          self.raw_file = Chef::Provider::RemoteFile::Fetcher.for_resource(uri, @new_resource, @current_resource).fetch
         end
 
         def current_resource_matches_target_checksum?
