@@ -91,4 +91,33 @@ describe Chef::REST do
   end
 
   it_behaves_like "downloading all the things"
+
+  context "rest endpoints" do
+    it "gets json inflated nodes via get_rest" do
+      nodes = Chef::REST.new("http://localhost:9000").get_rest("nodes")
+      expect(nodes).to be_a(Hash)
+      expect(nodes['foo']).to eql("https://api.opscode.com/organizations/scriptkiddie/nodes/foo")
+    end
+
+    it "gets json inflated nodes via get" do
+      nodes = Chef::REST.new("http://localhost:9000").get("nodes")
+      expect(nodes).to be_a(Hash)
+      expect(nodes['foo']).to eql("https://api.opscode.com/organizations/scriptkiddie/nodes/foo")
+    end
+
+    it "gets raw JSON to a tempfile via get_rest" do
+      tempfile = Chef::REST.new("http://localhost:9000").get_rest("nodes", true)
+      tempfile.close
+      nodes = JSON.parse(IO.read(tempfile.path))
+      expect(nodes['foo']).to eql("https://api.opscode.com/organizations/scriptkiddie/nodes/foo")
+    end
+
+    it "gets raw JSON to a tempfile via get" do
+      tempfile = Chef::REST.new("http://localhost:9000").get("nodes", true)
+      tempfile.close
+      nodes = JSON.parse(IO.read(tempfile.path))
+      expect(nodes['foo']).to eql("https://api.opscode.com/organizations/scriptkiddie/nodes/foo")
+    end
+  end
+
 end

@@ -155,6 +155,22 @@ module ChefHTTPShared
       }
     )
 
+    #
+    # RESTful endpoints
+    #
+    json_response = <<-EOF
+{
+  "foo":  "https://api.opscode.com/organizations/scriptkiddie/nodes/foo",
+  "bar":  "https://api.opscode.com/organizations/scriptkiddie/nodes/bar"
+}
+    EOF
+    @api.get('/nodes', 200, json_response,
+      {
+        'Content-Type' => 'application/json',
+        'Content-Length' => json_response.bytesize.to_s,
+      }
+    )
+
   end
 
   def stop_tiny_server
