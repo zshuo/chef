@@ -342,6 +342,14 @@ class Chef
     def reset_defaults_and_overrides
       self.default.clear
       self.override.clear
+      saved = {}
+      [:tags, :run_list].each do |attr|
+        saved[attr] = self.normal[attr]
+      end
+      self.normal.clear
+      [:tags, :run_list].each do |attr|
+        self.normal[attr] = saved[attr]
+      end
     end
 
     # Expands the node's run list and sets the default and override

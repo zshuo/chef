@@ -552,6 +552,10 @@ class Chef
     # immediately if 0.)
     default :run_lock_timeout, nil
 
+    # Setting this to false will clean normal attributes at the start of the chef
+    # run similarly to automatic, default and override.
+    default :persist_normal_attributes, true
+
     # If installed via an omnibus installer, this gives the path to the
     # "embedded" directory which contains all of the software packaged with
     # omnibus. This is used to locate the cacert.pem file on windows.
