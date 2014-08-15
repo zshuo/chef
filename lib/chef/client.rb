@@ -45,6 +45,7 @@ require 'chef/resource_reporter'
 require 'chef/run_lock'
 require 'chef/policy_builder'
 require 'chef/request_id'
+require 'chef/http/client_cache'
 require 'ohai'
 require 'rbconfig'
 
@@ -276,7 +277,6 @@ class Chef
       @policy_builder ||= Chef::PolicyBuilder.strategy.new(node_name, ohai.data, json_attribs, @override_runlist, events)
     end
 
-
     def save_updated_node
       if Chef::Config[:solo]
         # nothing to do
@@ -362,7 +362,6 @@ class Chef
     def expanded_run_list
       policy_builder.expand_run_list
     end
-
 
     def do_windows_admin_check
       if Chef::Platform.windows?
@@ -455,6 +454,7 @@ class Chef
         @run_status = nil
         run_context = nil
         runlock.release
+        Chef::HTTP::ClientCache.instance.shutdown
         GC.start
       end
       true
