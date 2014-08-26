@@ -203,6 +203,91 @@ class Chef
         :description => "Verify the SSL cert for HTTPS requests to the Chef server API.",
         :boolean     => true
 
+      option :vault_file,
+        :short       => '-L VAULT_FILE',
+        :long        => '--vault-file',
+        :description => 'A JSON file with a list of vault',
+        :proc        => lambda { |l| Chef::JSONCompat.from_json(::File.read(l)) }
+
+      option :vault_list,
+        :short       => '-l VAULT_LIST',
+        :long        => '--vault-list VAULT_LIST',
+        :description => 'A JSON string with the vault to be updated',
+        :proc        => lambda { |v| Chef::JSONCompat.from_json(v) }
+
+      option :preseed_attributes,
+        :long        => "--preseed-attributes JSON",
+        :description => "Attributes to pre-seed the node with",
+        :proc        => lambda { |a|
+          Chef::Config[:knife][:preseed_attributes] = Chef::JSONCompat.from_json(a) }
+
+      def register_client
+        node = search_for("name:#{@fqdn}", :node)
+        client = search_for("name:#{@fqdn}", :client)
+
+        if node.empty?
+          if client.empty?
+            Chef::ApiClient::Registration.new(@fqdn, config[:client_pem]).run
+            new_node = Chef::Node.new
+            new_node.name(@fqdn)
+            new_node.normal_attrs = Chef::Config[:knife][:preseed_attributes]
+            client_rest = Chef::REST.new(Chef::Config.chef_server_url, @fqdn, config[:client_pem])
+            client_rest.post_rest("nodes/", new_node)
+          else
+            ui.fatal("Something went wrong! Unable to find the Node: Please delete the Client and retry.")
+            exit 2
+          end
+        elsif client.empty?
+          ui.fatal("Something went wrong! Unable to find the Client: Please delete the Node and retry.")
+          exit 3
+        else
+          ui.info("Node already exist - skipping registration")
+        end
+      end
+
+      def retrieve_hostname
+        begin
+          connection.exec!("hostname")
+        rescue => e
+            ui.fatal(e.message)
+            raise
+        end
+      end
+
+      def delete_client_pem
+        File.delete(config[:client_pem]) if File.exist?(config[:client_pem])
+      end
+
+      def wait_node
+        sleep 5
+        search_for("name:#{@fqdn}").empty?
+      end
+
+      def ssh(hostname, username, options = {})
+        rescue_exceptions = [
+          Errno::EACCES, Errno::EADDRINUSE, Errno::ECONNREFUSED,
+          Errno::ECONNRESET, Errno::ENETUNREACH, Errno::EHOSTUNREACH,
+          Net::SSH::Disconnect
+        ]
+
+        options.merge!({ :port => config[:ssh_port] }) if config[:ssh_port]
+        options.merge!({ :password => config[:ssh_password] }) if config[:ssh_password]
+        options.merge!({ :keys_only => true }) if config[:identity_file]
+        options.merge!({ :keys => config[:identity_file] }) if config[:identity_file]
+
+        begin
+          Net::SSH.start(hostname, username, options)
+        rescue *rescue_exceptions => e
+          ui.fatal("Failed to connect to #{username}@#{hostname}: #{e.message}")
+          raise
+        end
+      end
+
+      def search_for(query, type = :node)
+        sc = Chef::Search::Query.new
+        sc.search(type, query)[0]
+      end
+
       def bootstrap_template
         # For some reason knife.merge_configs doesn't pick up the default values from
         # Chef::Config[:knife][:bootstrap_template] unless Chef::Config[:knife][:bootstrap_template]
@@ -257,6 +342,23 @@ class Chef
         @node_name = Array(@name_args).first
 
         $stdout.sync = true
+        @fqdn = config[:chef_node_name] || retrieve_hostname.strip
+
+        $stdout.sync = true
+        if config[:vault_list] || config[:vault_file]
+          ui.info("#{ui.color(@node_name, :bold)} Starting Pre-Bootstrap Process")
+          config[:client_pem] = File.expand_path(File.join(File.dirname(__FILE__), 'keeper.pem'))
+
+          ui.info("#{ui.color(@node_name, :bold)} Registering Node #{ui.color(@fqdn, :bold)}")
+          register_client
+
+          ui.info("#{ui.color(@node_name, :bold)} Waiting search node.. ") while wait_node
+
+          ui.info("#{ui.color(@node_name, :bold)} Updating Chef Vault(s)")
+          update_vault_list(config[:vault_list]) if config[:vault_list]
+          update_vault_list(config[:vault_file]) if config[:vault_file]
+        end
+
         ui.info("Connecting to #{ui.color(@node_name, :bold)}")
 
         begin
@@ -269,6 +371,8 @@ class Chef
             knife_ssh_with_password_auth.run
           end
         end
+      ensure
+        delete_client_pem if config[:client_pem]
       end
 
       def validate_name_args!
@@ -317,6 +421,35 @@ class Chef
         command
       end
 
+      def update_vault_list(vault_list)
+        vault_list.each do |vault, item|
+          if item.is_a?(Array)
+            item.each do |i|
+              update_vault(vault, i)
+            end
+          else
+            update_vault(vault, item)
+          end
+        end
+      end
+
+      def connection
+        @connection ||= ssh(@node_name, config[:ssh_user])
+      end
+
+      def update_vault(vault, item)
+        begin
+          vault_item = ChefVault::Item.load(vault, item)
+          vault_item.clients("name:#{@fqdn}")
+          vault_item.save
+        rescue ChefVault::Exceptions::KeysNotFound,
+          ChefVault::Exceptions::ItemNotFound
+
+          raise ChefVault::Exceptions::ItemNotFound,
+            "#{vault}/#{item} does not exist, "\
+            "you might want to delete the node before retrying."
+        end
+      end
     end
   end
 end
