@@ -37,6 +37,8 @@ describe Chef::Knife do
     @knife.ui.stub(:print)
     Chef::Log.stub(:init)
     Chef::Log.stub(:level)
+    Chef::LocalMode.stub(:setup_server_connectivity)
+    Chef::LocalMode.stub(:destroy_server_connectivity)
     [:debug, :info, :warn, :error, :crit].each do |level_sym|
       Chef::Log.stub(level_sym)
     end
@@ -333,6 +335,7 @@ describe Chef::Knife do
       response = Net::HTTPForbidden.new("1.1", "403", "Forbidden")
       response.instance_variable_set(:@read, true) # I hate you, net/http.
       response.stub(:body).and_return(Chef::JSONCompat.to_json(:error => "y u no administrator"))
+      Chef::Config[:chef_server_url] = 'http://a.b.com'
       @knife.stub(:run).and_raise(Net::HTTPServerException.new("403 Forbidden", response))
       @knife.stub(:username).and_return("sadpanda")
       @knife.run_with_pretty_exceptions

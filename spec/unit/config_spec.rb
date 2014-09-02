@@ -173,6 +173,7 @@ describe Chef::Config do
           end
 
           Chef::Config.stub(:path_accessible?).and_return(false)
+          Chef::Config[:local_mode] = false
         end
 
         describe "Chef::Config[:cache_path]" do
