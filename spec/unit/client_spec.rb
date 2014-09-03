@@ -98,6 +98,22 @@ describe Chef::Client do
     end
   end
 
+  # def load_config_file
+  #   Chef::Config.config_file_jail = config[:config_file_jail] if config[:config_file_jail]
+  #   if !config.has_key?(:config_file)
+  #     if config[:local_mode]
+  #       require 'chef/knife'
+  #       config[:config_file] = Chef::Knife.locate_config_file
+  #     else
+  #       config[:config_file] = Chef::Config.platform_specific_path("/etc/chef/client.rb")
+  #       if Chef::ConfigFetcher.new(config[:config_file], Chef::Config[:config_file_jail]).config_missing?
+  #         require 'chef/knife'
+  #         config[:config_file] = Chef::Knife.locate_config_file
+  #       end
+  #     end
+  #   end
+
+
   describe "configuring output formatters" do
     context "when no formatter has been configured" do
 
@@ -298,8 +314,8 @@ describe Chef::Client do
 
 
     describe "when running chef-client without fork" do
-
       include_examples "a successful client run"
+
     end
 
     describe "when running chef-client with forking enabled", :unix_only do

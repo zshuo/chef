@@ -22,13 +22,19 @@ require 'chef/exceptions'
 require 'chef/util/path_helper'
 
 describe Chef::Config do
-  describe "config attribute writer: chef_server_url" do
-    before do
-      Chef::Config.chef_server_url = "https://junglist.gen.nz"
+  describe "chef_server_url" do
+    it "chef_server_url defaults to nil" do
+      Chef::Config.chef_server_url.should == nil
     end
 
-    it "sets the server url" do
-      Chef::Config.chef_server_url.should == "https://junglist.gen.nz"
+    context "when chef_server_url is set to a string" do
+      before do
+        Chef::Config.chef_server_url = "https://junglist.gen.nz"
+      end
+
+      it "the server url is as expected" do
+        Chef::Config.chef_server_url.should == "https://junglist.gen.nz"
+      end
     end
 
     context "when the url has a leading space" do
@@ -52,6 +58,19 @@ describe Chef::Config do
       end
     end
 
+  end
+
+  describe "local_mode" do
+    it "by default, local mode is true" do
+      Chef::Config.local_mode.should == true
+    end
+
+    context "when chef_server_url is set" do
+      before { Chef::Config.chef_server_url = 'https://blah.com' }
+      it "when chef_server_url is set, local mode is false" do
+        Chef::Config.local_mode.should == false
+      end
+    end
   end
 
   describe "when configuring formatters" do
@@ -172,41 +191,76 @@ describe Chef::Config do
             Chef::Config[:user_home] = '/Users/charlie'
           end
 
-          Chef::Config.stub(:path_accessible?).and_return(false)
           Chef::Config[:local_mode] = false
         end
 
         describe "Chef::Config[:cache_path]" do
-          context "when /var/chef exists and is accessible" do
-            it "defaults to /var/chef" do
-              Chef::Config.stub(:path_accessible?).with(to_platform("/var/chef")).and_return(true)
-              Chef::Config[:cache_path].should == primary_cache_path
+          context "when /var/chef exists" do
+            before { File.stub(:exists?).with(to_platform("/var/chef")).and_return(true) }
+            before { File.stub(:exists?).with(to_platform("/var")).and_return(true) }
+            before { File.stub(:readable?).with(to_platform("/var")).and_return(true) }
+            before { File.stub(:writable?).with(to_platform("/var")).and_return(true) }
+
+            context "and is readable and writable" do
+              before { File.stub(:readable?).with(to_platform("/var/chef")).and_return(true) }
+              before { File.stub(:writable?).with(to_platform("/var/chef")).and_return(true) }
+
+              it "defaults to /var/chef" do
+                Chef::Config[:cache_path].should == primary_cache_path
+              end
+            end
+
+            context "and is not readable" do
+              before { File.stub(:readable?).with(to_platform("/var/chef")).and_return(false) }
+              before { File.stub(:writable?).with(to_platform("/var/chef")).and_return(true) }
+
+              it "defaults to HOME/.chef" do
+                Chef::Config[:cache_path].should == secondary_cache_path
+              end
+            end
+
+            context "and is not writable" do
+              before { File.stub(:readable?).with(to_platform("/var/chef")).and_return(true) }
+              before { File.stub(:writable?).with(to_platform("/var/chef")).and_return(false) }
+
+              it "defaults to HOME/.chef" do
+                Chef::Config[:cache_path].should == secondary_cache_path
+              end
             end
           end
 
-          context "when /var/chef does not exist and /var is accessible" do
-            it "defaults to /var/chef" do
-              File.stub(:exists?).with(to_platform("/var/chef")).and_return(false)
-              Chef::Config.stub(:path_accessible?).with(to_platform("/var")).and_return(true)
-              Chef::Config[:cache_path].should == primary_cache_path
-            end
-          end
+          context "when /var/chef does not exist" do
+            before { File.stub(:exists?).with(to_platform("/var/chef")).and_return(false) }
 
-          context "when /var/chef does not exist and /var is not accessible" do
-            it "defaults to $HOME/.chef" do
-              File.stub(:exists?).with(to_platform("/var/chef")).and_return(false)
-              Chef::Config.stub(:path_accessible?).with(to_platform("/var")).and_return(false)
-              Chef::Config[:cache_path].should == secondary_cache_path
-            end
-          end
+            context "and /var exists" do
+              before { File.stub(:exists?).with(to_platform("/var")).and_return(true) }
 
-          context "when /var/chef exists and is not accessible" do
-            it "defaults to $HOME/.chef" do
-              File.stub(:exists?).with(to_platform("/var/chef")).and_return(true)
-              File.stub(:readable?).with(to_platform("/var/chef")).and_return(true)
-              File.stub(:writable?).with(to_platform("/var/chef")).and_return(false)
+              context "and is readable and writable" do
+                before { File.stub(:readable?).with(to_platform("/var")).and_return(true) }
+                before { File.stub(:writable?).with(to_platform("/var")).and_return(true) }
 
-              Chef::Config[:cache_path].should == secondary_cache_path
+                it "defaults to /var/chef" do
+                  Chef::Config[:cache_path].should == primary_cache_path
+                end
+              end
+
+              context "and is not readable" do
+                before { File.stub(:readable?).with(to_platform("/var")).and_return(false) }
+                before { File.stub(:writable?).with(to_platform("/var")).and_return(true) }
+
+                it "defaults to HOME/.chef" do
+                  Chef::Config[:cache_path].should == secondary_cache_path
+                end
+              end
+
+              context "and is not writable" do
+                before { File.stub(:readable?).with(to_platform("/var")).and_return(true) }
+                before { File.stub(:writable?).with(to_platform("/var")).and_return(false) }
+
+                it "defaults to HOME/.chef" do
+                  Chef::Config[:cache_path].should == secondary_cache_path
+                end
+              end
             end
           end
 
@@ -220,8 +274,33 @@ describe Chef::Config do
                 Chef::Config.config_dir to_platform('/a/b/c')
               end
 
-              it "cache_path is /a/b/c/local-mode-cache" do
-                Chef::Config.cache_path.should == to_platform('/a/b/c/local-mode-cache')
+              context "and /a/b/c/local-mode-cache is writable" do
+                before { File.stub(:exists?).with(to_platform("/a/b/c/local-mode-cache")).and_return(true) }
+                before { File.stub(:readable?).with(to_platform("/a/b/c/local-mode-cache")).and_return(true) }
+                before { File.stub(:writable?).with(to_platform("/a/b/c/local-mode-cache")).and_return(true) }
+                it "cache_path is /a/b/c/local-mode-cache" do
+                  Chef::Config.cache_path.should == to_platform('/a/b/c/local-mode-cache')
+                end
+              end
+
+              context "and /a/b/c/local-mode-cache does not exist" do
+                before { File.stub(:exists?).with(to_platform("/a/b/c/local-mode-cache")).and_return(false) }
+
+                context "and /a/b/c is writable" do
+                  before { File.stub(:exists?).with(to_platform("/a/b/c")).and_return(true) }
+                  before { File.stub(:readable?).with(to_platform("/a/b/c")).and_return(true) }
+                  before { File.stub(:writable?).with(to_platform("/a/b/c")).and_return(true) }
+                  it "cache_path is /a/b/c/local-mode-cache" do
+                    Chef::Config.cache_path.should == to_platform('/a/b/c/local-mode-cache')
+                  end
+                end
+
+                context "and /a/b/c does not exist" do
+                  before { File.stub(:exists?).with(to_platform("/a/b/c")).and_return(false) }
+                  it "cache_path is $HOME/.chef" do
+                    Chef::Config.cache_path.should == secondary_cache_path
+                  end
+                end
               end
             end
 
@@ -230,8 +309,13 @@ describe Chef::Config do
                 Chef::Config.config_dir to_platform('/a/b/c/')
               end
 
-              it "cache_path is /a/b/c/local-mode-cache" do
-                Chef::Config.cache_path.should == to_platform('/a/b/c/local-mode-cache')
+              context "and /a/b/c/local-mode-cache is writable" do
+                before { File.stub(:exists?).with(to_platform("/a/b/c/local-mode-cache")).and_return(true) }
+                before { File.stub(:readable?).with(to_platform("/a/b/c/local-mode-cache")).and_return(true) }
+                before { File.stub(:writable?).with(to_platform("/a/b/c/local-mode-cache")).and_return(true) }
+                it "cache_path is /a/b/c/local-mode-cache" do
+                  Chef::Config.cache_path.should == to_platform('/a/b/c/local-mode-cache')
+                end
               end
             end
           end
