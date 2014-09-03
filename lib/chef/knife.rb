@@ -416,25 +416,26 @@ class Chef
     end
 
     def configure_chef
-      if !config[:config_file]
-        located_config_file = self.class.locate_config_file
-        config[:config_file] = located_config_file if located_config_file
-      end
-
-      # Don't try to load a knife.rb if it wasn't specified.
       if config[:config_file]
-        Chef::Config.config_file = config[:config_file]
         fetcher = Chef::ConfigFetcher.new(config[:config_file], Chef::Config.config_file_jail)
         if fetcher.config_missing?
           ui.error("Specified config file #{config[:config_file]} does not exist#{Chef::Config.config_file_jail ? " or is not under config file jail #{Chef::Config.config_file_jail}" : ""}!")
           exit 1
         end
+      else
+        Chef::Log.debug("No config file specified.  Looking for knife.rb ...")
+        located_config_file = self.class.locate_config_file
+        if located_config_file
+          config[:config_file] = located_config_file if located_config_file
+          fetcher = Chef::ConfigFetcher.new(config[:config_file], Chef::Config.config_file_jail)
+        else
+          fetcher = nil
+        end
+      end
+
+      if fetcher
         Chef::Log.debug("Using configuration from #{config[:config_file]}")
         read_config(fetcher.read_config, config[:config_file])
-      else
-        # ...but do log a message if no config was found.
-        Chef::Config[:color] = config[:color]
-        ui.warn("No knife configuration file found")
       end
 
       merge_configs

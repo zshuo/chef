@@ -91,7 +91,6 @@ describe Chef::Knife do
   it "configure knife from nothing" do
     ::File.stub(:exist?).and_return(false)
     @knife = Chef::Knife.new
-    @knife.ui.should_receive(:warn).with("No knife configuration file found")
     @knife.configure_chef
     @knife.config[:config_file].should be_nil
   end
