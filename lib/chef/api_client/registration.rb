@@ -38,7 +38,6 @@ class Chef
         @name                         = name
         @destination                  = destination
         @http_api                     = opts[:http_api]
-        @update                       = opts[:update].nil? ? true : opts[:update]
         @server_generated_private_key = nil
       end
 
@@ -56,7 +55,7 @@ class Chef
         assert_destination_writable!
         retries = Config[:client_registration_retries] || 5
         begin
-          should_update? ? create_or_update : create
+          create_or_update
         rescue Net::HTTPFatalError => e
           # HTTPFatalError implies 5xx.
           raise if retries <= 0
@@ -157,12 +156,6 @@ class Chef
         # Windows doesn't have symlinks, so it doesn't have NOFOLLOW
         base_flags |= File::NOFOLLOW if defined?(File::NOFOLLOW)
         base_flags
-      end
-
-      private
-
-      def should_update?
-        !!@update
       end
     end
   end

@@ -26,6 +26,8 @@ class Chef
       deps do
         require 'chef/knife/core/bootstrap_context'
         require 'chef/json_compat'
+        require 'chef/api_client/registration'
+        require 'chef/node'
         require 'tempfile'
         require 'highline'
         require 'net/ssh'
@@ -215,77 +217,107 @@ class Chef
         :description => 'A JSON string with the vault to be updated',
         :proc        => lambda { |v| Chef::JSONCompat.from_json(v) }
 
-      option :preseed_attributes,
-        :long        => "--preseed-attributes JSON",
-        :description => "Attributes to pre-seed the node with",
-        :proc        => lambda { |a|
-          Chef::Config[:knife][:preseed_attributes] = Chef::JSONCompat.from_json(a) }
+      option :bootstrap_uses_validator,
+        :long        => "--[no-]bootstrap-uses-validator",
+        :description => "Force bootstrap to use validation.pem instead of users client key",
+        :boolean     => true,
+        :default     => false
+
+      option :bootstrap_overwrite_node,
+        :long        => "--[no-]bootstrap-overwrite-node",
+        :description => "When bootstrapping (without validation.pem) overwrite existing node",
+        :boolean     => true,
+        :default     => false
+
+      def normalized_run_list
+        case config[:run_list]
+        when nil
+          []
+        when String
+          config[:run_list].split(/\s*,\s*/)
+        when Array
+          config[:run_list]
+        end
+      end
+
+      def node_exists?
+        return @node_exists unless @node_exists.nil?
+        @node_exists =
+          begin
+          rest.get_rest("node/#{node_name}")
+          true
+#        rescue # Something
+#          false
+        end
+      end
+
+      def client_exists?
+        return @client_exists unless @client_exists.nil?
+        @client_exists =
+        begin
+          rest.get_rest("client/#{node_name}")
+          true
+#        rescue  # Something
+#          false
+        end
+      end
 
       def register_client
-        node = search_for("name:#{@fqdn}", :node)
-        client = search_for("name:#{@fqdn}", :client)
+        tmpdir = Dir.mktmpdir
+        client_path = File.join(tmpdir, "#{node_name}.pem")
+        overwrite_node = Chef::Config[:knife][:bootstrap_overwrite_node] || config[:bootstrap_overwrite_node]
 
-        if node.empty?
-          if client.empty?
-            Chef::ApiClient::Registration.new(@fqdn, config[:client_pem]).run
-            new_node = Chef::Node.new
-            new_node.name(@fqdn)
-            new_node.normal_attrs = Chef::Config[:knife][:preseed_attributes]
-            client_rest = Chef::REST.new(Chef::Config.chef_server_url, @fqdn, config[:client_pem])
-            client_rest.post_rest("nodes/", new_node)
+        if node_exists?
+          if client_exists?
+            if !overwrite_node
+              # default:  protect users from overwriting properly created node/client pairs
+              ui.fatal("Node and client already exist and bootstrap_overwrite_node is false")
+            else
+              # chainsaw mode:  if you typo the wong thing, we will delete your production servers
+              ui.info("Will overwrite existing node and client because bootstrap_overwrite_node is true")
+            end
           else
-            ui.fatal("Something went wrong! Unable to find the Node: Please delete the Client and retry.")
-            exit 2
+            # most positive action:  assume you've precreated node data
+            ui.info("Node exists, but client does not, assuming pre-created node data")
           end
-        elsif client.empty?
-          ui.fatal("Something went wrong! Unable to find the Client: Please delete the Node and retry.")
-          exit 3
         else
-          ui.info("Node already exist - skipping registration")
+          if client_exists?
+            # most positive action:  you forgot to delete a client, so clean it up
+            ui.info("Node does not exist, but client does, will delete and recreate old client")
+          else
+            ui.info("Will create new node and client")
+          end
         end
-      end
 
-      def retrieve_hostname
-        begin
-          connection.exec!("hostname")
-        rescue => e
-            ui.fatal(e.message)
-            raise
-        end
-      end
+        ui.info("Creating client for #{node_name} on server#{ "(replacing existing client)" if client_exists? }")
 
-      def delete_client_pem
-        File.delete(config[:client_pem]) if File.exist?(config[:client_pem])
-      end
+        Chef::ApiClient::Registration.new(node_name, client_path, http_api: rest).run
 
-      def wait_node
-        sleep 5
-        search_for("name:#{@fqdn}").empty?
-      end
+        first_boot_attributes = Chef::Config[:knife][:first_boot_attributes] || config[:first_boot_attributes]
+        new_node = Chef::Node.new
+        new_node.name(node_name)
+        new_node.run_list(normalized_run_list)
+        new_node.normal_attrs = first_boot_attribute if first_boot_attributes
+        new_node.environment(config[:environment]) if config[:environment]
 
-      def ssh(hostname, username, options = {})
-        rescue_exceptions = [
-          Errno::EACCES, Errno::EADDRINUSE, Errno::ECONNREFUSED,
-          Errno::ECONNRESET, Errno::ENETUNREACH, Errno::EHOSTUNREACH,
-          Net::SSH::Disconnect
-        ]
+        client_rest = Chef::REST.new(
+          Chef::Config.chef_server_url,
+          node_name,
+          client_path,
+        )
 
-        options.merge!({ :port => config[:ssh_port] }) if config[:ssh_port]
-        options.merge!({ :password => config[:ssh_password] }) if config[:ssh_password]
-        options.merge!({ :keys_only => true }) if config[:identity_file]
-        options.merge!({ :keys => config[:identity_file] }) if config[:identity_file]
+        client_rest.post_rest("nodes/", new_node)
 
-        begin
-          Net::SSH.start(hostname, username, options)
-        rescue *rescue_exceptions => e
-          ui.fatal("Failed to connect to #{username}@#{hostname}: #{e.message}")
-          raise
-        end
-      end
-
-      def search_for(query, type = :node)
-        sc = Chef::Search::Query.new
-        sc.search(type, query)[0]
+        #          else
+        #            ui.fatal("Something went wrong! Unable to find the Node: Please delete the Client and retry.")
+        #            exit 2
+        #          end
+        #        elsif client.empty?
+        #          ui.fatal("Something went wrong! Unable to find the Client: Please delete the Node and retry.")
+        #          exit 3
+        #        else
+        #          ui.info("Node already exist - skipping registration")
+        #        end
       end
 
       def bootstrap_template
@@ -337,29 +369,31 @@ class Chef
         Erubis::Eruby.new(template).evaluate(context)
       end
 
+      def node_name
+        config[:chef_node_name]
+      end
+
       def run
         validate_name_args!
-        @node_name = Array(@name_args).first
 
         $stdout.sync = true
-        @fqdn = config[:chef_node_name] || retrieve_hostname.strip
 
-        $stdout.sync = true
         if config[:vault_list] || config[:vault_file]
-          ui.info("#{ui.color(@node_name, :bold)} Starting Pre-Bootstrap Process")
+          ui.info("#{ui.color(connection_server_name, :bold)} Starting Pre-Bootstrap Process")
           config[:client_pem] = File.expand_path(File.join(File.dirname(__FILE__), 'keeper.pem'))
 
-          ui.info("#{ui.color(@node_name, :bold)} Registering Node #{ui.color(@fqdn, :bold)}")
+          ui.info("#{ui.color(connection_server_name, :bold)} Registering Node #{ui.color(node_name, :bold)}")
           register_client
 
-          ui.info("#{ui.color(@node_name, :bold)} Waiting search node.. ") while wait_node
+          ui.info("#{ui.color(connection_server_name, :bold)} Waiting search node.. ") while wait_node
 
-          ui.info("#{ui.color(@node_name, :bold)} Updating Chef Vault(s)")
+          ui.info("#{ui.color(connection_server_name, :bold)} Updating Chef Vault(s)")
           update_vault_list(config[:vault_list]) if config[:vault_list]
+          de
           update_vault_list(config[:vault_file]) if config[:vault_file]
         end
 
-        ui.info("Connecting to #{ui.color(@node_name, :bold)}")
+        ui.info("Connecting to #{ui.color(connection_server_name, :bold)}")
 
         begin
           knife_ssh.run
@@ -371,27 +405,25 @@ class Chef
             knife_ssh_with_password_auth.run
           end
         end
-      ensure
-        delete_client_pem if config[:client_pem]
       end
 
       def validate_name_args!
-        if Array(@name_args).first.nil?
+        if connection_server_name.nil?
           ui.error("Must pass an FQDN or ip to bootstrap")
           exit 1
-        elsif Array(@name_args).first == "windows"
+        elsif connection_server_name.first == "windows"
           ui.warn("Hostname containing 'windows' specified. Please install 'knife-windows' if you are attempting to bootstrap a Windows node via WinRM.")
         end
       end
 
-      def server_name
+      def connection_server_name
         Array(@name_args).first
       end
 
       def knife_ssh
         ssh = Chef::Knife::Ssh.new
         ssh.ui = ui
-        ssh.name_args = [ server_name, ssh_command ]
+        ssh.name_args = [ connection_server_name, ssh_command ]
         ssh.config[:ssh_user] = Chef::Config[:knife][:ssh_user] || config[:ssh_user]
         ssh.config[:ssh_password] = config[:ssh_password]
         ssh.config[:ssh_port] = Chef::Config[:knife][:ssh_port] || config[:ssh_port]
@@ -433,14 +465,12 @@ class Chef
         end
       end
 
-      def connection
-        @connection ||= ssh(@node_name, config[:ssh_user])
-      end
-
       def update_vault(vault, item)
         begin
           vault_item = ChefVault::Item.load(vault, item)
-          vault_item.clients("name:#{@fqdn}")
+          # this is idiotic to call here, it searches for the node to get the client to set on the item -- and
+          # we just created the node and the client, so why the hell do we need to wait for search?
+          vault_item.clients("name:#{node_name}")
           vault_item.save
         rescue ChefVault::Exceptions::KeysNotFound,
           ChefVault::Exceptions::ItemNotFound
