@@ -301,6 +301,7 @@ class Chef::Application::Client < Chef::Application
       SELF_PIPE.replace IO.pipe
 
       trap("USR1") do
+        puts "USR1 CAUGHT!"
         Chef::Log.info("SIGUSR1 received, waking up")
         SELF_PIPE[1].putc(IMMEDIATE_RUN_SIGNAL) # wakeup master process from select
       end
@@ -322,25 +323,22 @@ class Chef::Application::Client < Chef::Application
       Chef::Daemon.daemonize("chef-client")
     end
 
-    signal = nil
-
     loop do
       begin
-        Chef::Application.exit!("Exiting", 0) if signal == GRACEFUL_EXIT_SIGNAL
+        @signal = get_signal
 
-        if Chef::Config[:splay] and signal != IMMEDIATE_RUN_SIGNAL
-          splay = rand Chef::Config[:splay]
-          Chef::Log.debug("Splay sleep #{splay} seconds")
-          sleep splay
+        if ( Chef::Config[:splay] || Chef::Config[:interval] ) && !@signal
+          puts "THE FUCK?!?!?"
+          splay = ( rand Chef::Config[:splay] ) + Chef::Config[:interval]  # FIXME: nil handling?
+          Chef::Log.debug("sleeping #{splay} seconds")
+          interval_sleep splay
         end
 
-        signal = nil
+        Chef::Application.exit!("Exiting", 0) if @signal == GRACEFUL_EXIT_SIGNAL
+
         run_chef_client(Chef::Config[:specific_recipes])
 
-        if Chef::Config[:interval]
-          Chef::Log.debug("Sleeping for #{Chef::Config[:interval]} seconds")
-          signal = interval_sleep
-        else
+        unless Chef::Config[:interval]
           Chef::Application.exit! "Exiting", 0
         end
       rescue SystemExit => e
@@ -348,8 +346,7 @@ class Chef::Application::Client < Chef::Application
       rescue Exception => e
         if Chef::Config[:interval]
           Chef::Log.error("#{e.class}: #{e}")
-          Chef::Log.error("Sleeping for #{Chef::Config[:interval]} seconds before trying again")
-          signal = interval_sleep
+          Chef::Log.error("Retrying...")
           retry
         else
           Chef::Application.fatal!("#{e.class}: #{e.message}", 1)
@@ -360,17 +357,21 @@ class Chef::Application::Client < Chef::Application
 
   private
 
-  def interval_sleep
+  def interval_sleep(secs)
     unless SELF_PIPE.empty?
-      client_sleep Chef::Config[:interval]
+      client_sleep secs
     else
       # Windows
-      sleep Chef::Config[:interval]
+      sleep secs
     end
   end
 
-  def client_sleep(sec)
-    IO.select([ SELF_PIPE[0] ], nil, nil, sec) or return
-    SELF_PIPE[0].getc.chr
+  def client_sleep(secs)
+    IO.select([ SELF_PIPE[0] ], nil, nil, secs) or return
+    @signal = SELF_PIPE[0].getc.chr
+  end
+
+  def get_signal
+    client_sleep(0)
   end
 end

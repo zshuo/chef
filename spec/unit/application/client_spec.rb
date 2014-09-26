@@ -176,6 +176,7 @@ describe Chef::Application::Client, "run_application", :unix_only do
         # If everything is fine, sending USR1 to self should prevent
         # app to go into splay sleep forever.
         Process.kill("USR1", Process.pid)
+        puts "FUCK YOU, KILLED MYSELF!!!"
       end
 
       number_of_sleep_calls = 0
@@ -185,10 +186,12 @@ describe Chef::Application::Client, "run_application", :unix_only do
       # We have to do it this way because the main loop of
       # Chef::Application::Client swallows most exceptions, and we need to be
       # able to expose our expectation failures to the parent process in the test.
-      @app.stub(:sleep) do |arg|
+      expect(@app).to_not receive(:sleep)
+      @app.stub(:interval_sleep) do |arg|
         number_of_sleep_calls += 1
         if number_of_sleep_calls > 1
-          exit 127
+          puts number_of_sleep_calls
+          #exit 127
         end
       end
     end
