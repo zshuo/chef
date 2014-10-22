@@ -41,7 +41,7 @@ shared_examples_for "a Windows script resource" do
 
   context "when evaluating guards" do
     it "should default to using guard_interpreter attribute that is the same as the resource" do
-      @resource.guard_interpreter.should == @resource.resource_name
+      @resource.guard_interpreter.should == :self
     end
 
     it "should use a resource to evaluate the guard when guard_interpreter is not specified" do

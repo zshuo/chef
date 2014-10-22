@@ -82,7 +82,9 @@ class Chef
           raise ArgumentError, "Node for guard resource parent must not be nil"
         end
 
-        resource_class = Chef::Resource.resource_for_node(parent_resource.guard_interpreter, parent_resource.node)
+        guard_resource = (parent_resource.guard_interpreter != :self) ? parent_resource.guard_interpreter : parent_resource.resource_name
+
+        resource_class = Chef::Resource.resource_for_node(guard_resource, parent_resource.node)
 
         if resource_class.nil?
           raise ArgumentError, "Specified guard_interpreter resource #{parent_resource.guard_interpreter.to_s} unknown for this platform"

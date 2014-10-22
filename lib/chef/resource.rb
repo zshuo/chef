@@ -229,8 +229,6 @@ F
 
     attr_reader :elapsed_time
 
-    attr_reader :default_guard_interpreter
-
     # Each notify entry is a resource/action pair, modeled as an
     # Struct with a #resource and #action member
 
@@ -258,7 +256,6 @@ F
       # interpreter. Therefore we store the default separately in a different
       # attribute.
       @guard_interpreter = nil
-      @default_guard_interpreter = :default
       @elapsed_time = 0
       @sensitive = false
     end
@@ -419,15 +416,11 @@ F
     end
 
     def guard_interpreter(arg=nil)
-      if arg.nil?
-        @guard_interpreter || @default_guard_interpreter
-      else
-        set_or_return(
-          :guard_interpreter,
-          arg,
-          :kind_of => Symbol
-        )
-      end
+      set_or_return(
+        :guard_interpreter,
+        arg,
+        :kind_of => Symbol
+      )
     end
 
     # Sets up a notification from this resource to the resource specified by +resource_spec+.
