@@ -45,6 +45,11 @@ class Chef
 
     attr_accessor :recipe_list, :run_state, :override_runlist
 
+    # When the run_context is created it is passed the cookbook_collection from the
+    # policy builder objects.  The RunContext also proxies that message into the node so
+    # that we can track the cookbooks which are used.
+    attr_accessor :cookbook_collection
+
     # RunContext will set itself as run_context via this setter when
     # initialized. This is needed so DSL::IncludeAttribute (in particular,
     # #include_recipe) can access the run_context to determine if an attributes
@@ -70,6 +75,14 @@ class Chef
       @attributes = Chef::Node::Attribute.new({}, {}, {}, {})
 
       @run_state = {}
+    end
+
+    def cookbook_collection=(cookbook_collection)
+      cookbook_collection.each do |cookbook_name, cookbook|
+        automatic_attrs[:cookbooks][cookbook_name][:version] = cookbook.version
+      end
+
+      @cookbook_collection = cookbook_collection
     end
 
     # Used by DSL
@@ -252,6 +265,7 @@ class Chef
     # saved back to the node and be searchable
     def loaded_recipe(cookbook, recipe)
       fully_qualified_recipe = "#{cookbook}::#{recipe}"
+      automatic_attrs[:recipes] = [] if self[:recipes].nil?
       automatic_attrs[:recipes] << fully_qualified_recipe unless Array(self[:recipes]).include?(fully_qualified_recipe)
     end
 
@@ -362,7 +376,7 @@ class Chef
 
       self.tags # make sure they're defined
 
-      automatic_attrs[:recipes] = expansion.recipes
+      automatic_attrs[:expanded_run_list] = expansion.recipes.with_fully_qualified_names_and_version_constraints
       automatic_attrs[:roles] = expansion.roles
 
       apply_expansion_attributes(expansion)
