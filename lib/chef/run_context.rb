@@ -86,7 +86,7 @@ class Chef
       @reboot_info = {}
 
       @node.run_context = self
-      @node.cookbook_collection = cookbook_collection
+      @node.consume_cookbook_collection
       @cookbook_compiler = nil
       @provider_resolver = Chef::ProviderResolver.new(@node)
     end

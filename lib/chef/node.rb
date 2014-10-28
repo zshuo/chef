@@ -45,11 +45,6 @@ class Chef
 
     attr_accessor :recipe_list, :run_state, :override_runlist
 
-    # When the run_context is created it is passed the cookbook_collection from the
-    # policy builder objects.  The RunContext also proxies that message into the node so
-    # that we can track the cookbooks which are used.
-    attr_accessor :cookbook_collection
-
     # RunContext will set itself as run_context via this setter when
     # initialized. This is needed so DSL::IncludeAttribute (in particular,
     # #include_recipe) can access the run_context to determine if an attributes
@@ -77,12 +72,12 @@ class Chef
       @run_state = {}
     end
 
-    def cookbook_collection=(cookbook_collection)
-      cookbook_collection.each do |cookbook_name, cookbook|
+    # after the run_context has been set on the node, go through the cookbook_collection
+    # and setup the node[:cookbooks] attribute so that it is published in the node object
+    def consume_cookbook_collection
+      run_context.cookbook_collection.each do |cookbook_name, cookbook|
         automatic_attrs[:cookbooks][cookbook_name][:version] = cookbook.version
       end
-
-      @cookbook_collection = cookbook_collection
     end
 
     # Used by DSL
