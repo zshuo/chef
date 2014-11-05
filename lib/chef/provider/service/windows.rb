@@ -247,7 +247,6 @@ Revision=1
 EOS
   end
 
-  # these functions let the tests delete the files in the failure case, by making sure they have workable paths.
   def grant_logfile_name(username)
     Chef::Util::PathHelper.canonical_path("#{Dir.tmpdir}/logon_grant-#{clean_username_for_path(username)}-#{$$}.log", prefix=false)
   end
