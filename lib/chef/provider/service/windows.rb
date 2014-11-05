@@ -234,6 +234,7 @@ class Chef::Provider::Service::Windows < Chef::Provider::Service
     @new_resource.enabled(nil)
   end
 
+  private
   def make_policy_text(username)
     text = <<-EOS
 [Unicode]
@@ -295,7 +296,6 @@ EOS
     username.sub(/^\.?\\+/, '')
   end
 
-  private
   def current_state
     Win32::Service.status(@new_resource.service_name).current_state
   end

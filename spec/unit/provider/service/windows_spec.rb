@@ -387,7 +387,24 @@ describe Chef::Provider::Service::Windows, "load_current_resource" do
     end
   end
 
+  shared_context "testing private methods" do
+
+    let(:private_methods) {
+      described_class.private_instance_methods
+    }
+
+    before {
+      described_class.send(:public, *private_methods)
+    }
+
+    after {
+      described_class.send(:private, *private_methods)
+    }
+  end
+
   describe "grant_service_logon" do
+    include_context "testing private methods"
+
     let(:username) { "unit_test_user" }
     let(:success_string) { "The task has completed successfully.\r\nSee logfile etc." }
     let(:failure_string) { "Look on my works, ye Mighty, and despair!" }
@@ -418,6 +435,8 @@ describe Chef::Provider::Service::Windows, "load_current_resource" do
   end
 
   describe "cleaning usernames" do
+    include_context "testing private methods"
+
     it "correctly reformats usernames to create valid filenames" do
       expect(@provider.clean_username_for_path("\\\\problem username/oink.txt")).to eq("_problem_username_oink_txt")
       expect(@provider.clean_username_for_path("boring_username")).to eq("boring_username")
