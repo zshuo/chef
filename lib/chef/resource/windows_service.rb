@@ -39,7 +39,6 @@ class Chef
         @startup_type = :automatic
         @run_as = ""
         @run_as_password = ""
-        @display_name = ""
       end
 
       def startup_type(arg=nil)
@@ -49,14 +48,6 @@ class Chef
           :startup_type,
           arg,
           :equal_to => [ :automatic, :manual, :disabled ]
-        )
-      end
-
-      def display_name(arg=nil)
-        set_or_return(
-          :display_name,
-          arg,
-          :kind_of => [ String ]
         )
       end
 

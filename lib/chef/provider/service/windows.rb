@@ -70,7 +70,6 @@ class Chef::Provider::Service::Windows < Chef::Provider::Service
       # reconfiguration is idempotent, so just do it.
       new_config = {
         service_name: @new_resource.service_name,
-        display_name: @new_resource.display_name,
         service_start_name: @new_resource.run_as,
         password: @new_resource.run_as_password,
       }.reject { |k,v| v.nil? || v.length == 0 }
