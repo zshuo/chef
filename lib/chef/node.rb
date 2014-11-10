@@ -260,8 +260,7 @@ class Chef
     # saved back to the node and be searchable
     def loaded_recipe(cookbook, recipe)
       fully_qualified_recipe = "#{cookbook}::#{recipe}"
-      automatic_attrs[:recipes] = [] if self[:recipes].nil?
-      automatic_attrs[:recipes] << fully_qualified_recipe unless Array(self[:recipes]).include?(fully_qualified_recipe)
+      #automatic_attrs[:recipes] << fully_qualified_recipe unless run_context.loaded_fully_qualified_recipe?(cookbook, recipe)
     end
 
     # Returns true if this Node expects a given role, false if not.
@@ -371,6 +370,7 @@ class Chef
 
       self.tags # make sure they're defined
 
+      automatic_attrs[:recipes] = []
       automatic_attrs[:expanded_run_list] = expansion.recipes.with_fully_qualified_names_and_version_constraints
       automatic_attrs[:roles] = expansion.roles
 
