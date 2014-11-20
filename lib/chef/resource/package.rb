@@ -54,7 +54,7 @@ class Chef
         set_or_return(
           :version,
           arg,
-          :kind_of => [ String ]
+          :regex => /\S/
         )
       end
 
