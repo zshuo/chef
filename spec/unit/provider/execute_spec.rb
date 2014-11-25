@@ -31,9 +31,14 @@ describe Chef::Provider::Execute do
     @provider = Chef::Provider::Execute.new(@new_resource, @run_context)
     @current_resource = Chef::Resource::Ifconfig.new("foo_resource", @run_context)
     @provider.current_resource = @current_resource
+    @original_log_level = Chef::Log.level
     Chef::Log.level = :info
     # FIXME: There should be a test for how STDOUT.tty? changes the live_stream option being passed
     allow(STDOUT).to receive(:tty?).and_return(true)
+  end
+
+  after do
+    Chef::Log.level = @original_log_level
   end
 
   let(:opts) do
@@ -102,4 +107,3 @@ describe Chef::Provider::Execute do
     expect(@new_resource).not_to be_updated
   end
 end
-

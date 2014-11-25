@@ -33,41 +33,45 @@ class Chef
         true
       end
 
+      def command
+        new_resource.command
+      end
+
       def action_run
         opts = {}
 
         if sentinel_file = sentinel_file_if_exists
-          Chef::Log.debug("#{@new_resource} sentinel file #{sentinel_file} exists - nothing to do")
+          Chef::Log.debug("#{new_resource} sentinel file #{sentinel_file} exists - nothing to do")
           return false
         end
 
         # original implementation did not specify a timeout, but ShellOut
         # *always* times out. So, set a very long default timeout
-        opts[:timeout] = @new_resource.timeout || 3600
-        opts[:returns] = @new_resource.returns if @new_resource.returns
-        opts[:environment] = @new_resource.environment if @new_resource.environment
-        opts[:user] = @new_resource.user if @new_resource.user
-        opts[:group] = @new_resource.group if @new_resource.group
-        opts[:cwd] = @new_resource.cwd if @new_resource.cwd
-        opts[:umask] = @new_resource.umask if @new_resource.umask
+        opts[:timeout] = new_resource.timeout || 3600
+        opts[:returns] = new_resource.returns if new_resource.returns
+        opts[:environment] = new_resource.environment if new_resource.environment
+        opts[:user] = new_resource.user if new_resource.user
+        opts[:group] = new_resource.group if new_resource.group
+        opts[:cwd] = new_resource.cwd if new_resource.cwd
+        opts[:umask] = new_resource.umask if new_resource.umask
         opts[:log_level] = :info
-        opts[:log_tag] = @new_resource.to_s
-        if STDOUT.tty? && !Chef::Config[:daemon] && Chef::Log.info? && !@new_resource.sensitive
+        opts[:log_tag] = new_resource.to_s
+        if STDOUT.tty? && !Chef::Config[:daemon] && Chef::Log.info? && !new_resource.sensitive
           opts[:live_stream] = STDOUT
         end
-        description = @new_resource.sensitive ? "sensitive resource" : @new_resource.command
+        description = new_resource.sensitive ? "sensitive resource" : command
         converge_by("execute #{description}") do
-          result = shell_out!(@new_resource.command, opts)
-          Chef::Log.info("#{@new_resource} ran successfully")
+          result = shell_out!(command, opts)
+          Chef::Log.info("#{new_resource} ran successfully")
         end
       end
 
       private
 
       def sentinel_file_if_exists
-        if sentinel_file = @new_resource.creates
+        if sentinel_file = new_resource.creates
           relative = Pathname(sentinel_file).relative?
-          cwd = @new_resource.cwd
+          cwd = new_resource.cwd
           if relative && !cwd
             Chef::Log.warn "You have provided relative path for execute#creates (#{sentinel_file}) without execute#cwd (see CHEF-3819)"
           end
