@@ -21,7 +21,7 @@ require 'chef/role'
 
 describe Chef::Role do
   before(:each) do
-    allow(Chef::Platform).to receive(:windows?) { false }
+    allow(ChefConfig).to receive(:windows?) { false }
     @role = Chef::Role.new
     @role.name("ops_master")
   end
@@ -217,7 +217,7 @@ describe Chef::Role do
 
     end
 
-    include_examples "to_json equalivent to Chef::JSONCompat.to_json" do
+    include_examples "to_json equivalent to Chef::JSONCompat.to_json" do
       let(:jsonable) { @role }
     end
   end

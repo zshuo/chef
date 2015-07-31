@@ -22,7 +22,7 @@ require 'chef/data_bag'
 describe Chef::DataBag do
   before(:each) do
     @data_bag = Chef::DataBag.new
-    allow(Chef::Platform)::to receive(:windows?) { false }
+    allow(ChefConfig).to receive(:windows?) { false }
   end
 
   describe "initialize" do
@@ -73,7 +73,7 @@ describe Chef::DataBag do
         expect(@deserial.send(t.to_sym)).to eq(@data_bag.send(t.to_sym))
       end
 
-      include_examples "to_json equalivent to Chef::JSONCompat.to_json" do
+      include_examples "to_json equivalent to Chef::JSONCompat.to_json" do
         let(:jsonable) { @data_bag }
       end
     end

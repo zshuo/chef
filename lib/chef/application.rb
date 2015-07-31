@@ -49,6 +49,7 @@ class Chef
       configure_logging
       configure_proxy_environment_variables
       configure_encoding
+      emit_warnings
     end
 
     # Get this party started
@@ -92,7 +93,6 @@ class Chef
       if config[:config_file].nil?
         Chef::Log.warn("No config file found or specified on command line, using command line options.")
       elsif config_fetcher.config_missing?
-        pp config_missing: true
         Chef::Log.warn("*****************************************")
         Chef::Log.warn("Did not find config file: #{config[:config_file]}, using command line options.")
         Chef::Log.warn("*****************************************")
@@ -101,6 +101,12 @@ class Chef
         apply_config(config_content, config[:config_file])
       end
       Chef::Config.merge!(config)
+    end
+
+    def set_specific_recipes
+      Chef::Config[:specific_recipes] =
+        cli_arguments.map { |file| File.expand_path(file) } if
+        cli_arguments.respond_to?(:map)
     end
 
     # Initialize and configure the logger.
@@ -199,16 +205,18 @@ class Chef
 
     # Initializes Chef::Client instance and runs it
     def run_chef_client(specific_recipes = [])
+      unless specific_recipes.respond_to?(:size)
+        raise ArgumentError, 'received non-Array like specific_recipes argument'
+      end
+
       Chef::LocalMode.with_server_connectivity do
         override_runlist = config[:override_runlist]
-        if specific_recipes.size > 0
-          override_runlist ||= []
-        end
+        override_runlist ||= [] if specific_recipes.size > 0
         @chef_client = Chef::Client.new(
           @chef_client_json,
-          :override_runlist => config[:override_runlist],
-          :specific_recipes => specific_recipes,
-          :runlist => config[:runlist]
+          override_runlist: override_runlist,
+          specific_recipes: specific_recipes,
+          runlist: config[:runlist]
         )
         @chef_client_json = nil
 
@@ -238,7 +246,7 @@ class Chef
       # Override the TERM signal.
       trap('TERM') do
         Chef::Log.debug("SIGTERM received during converge," +
-                        " finishing converge to exit normally (send SIGINT to terminate immediately)")
+          " finishing converge to exit normally (send SIGINT to terminate immediately)")
       end
 
       @chef_client.run
@@ -252,7 +260,7 @@ class Chef
         # TERM singal is received (exit gracefully)
         trap('TERM') do
           Chef::Log.debug("SIGTERM received during converge," +
-                          " finishing converge to exit normally (send SIGINT to terminate immediately)")
+            " finishing converge to exit normally (send SIGINT to terminate immediately)")
         end
 
         client_solo = Chef::Config[:solo] ? "chef-solo" : "chef-client"
@@ -298,7 +306,7 @@ class Chef
     def configure_http_proxy
       if http_proxy = Chef::Config[:http_proxy]
         http_proxy_string = configure_proxy("http", http_proxy,
-                                            Chef::Config[:http_proxy_user], Chef::Config[:http_proxy_pass])
+          Chef::Config[:http_proxy_user], Chef::Config[:http_proxy_pass])
         env['http_proxy'] = http_proxy_string unless env['http_proxy']
         env['HTTP_PROXY'] = http_proxy_string unless env['HTTP_PROXY']
       end
@@ -308,7 +316,7 @@ class Chef
     def configure_https_proxy
       if https_proxy = Chef::Config[:https_proxy]
         https_proxy_string = configure_proxy("https", https_proxy,
-                                             Chef::Config[:https_proxy_user], Chef::Config[:https_proxy_pass])
+          Chef::Config[:https_proxy_user], Chef::Config[:https_proxy_pass])
         env['https_proxy'] = https_proxy_string unless env['https_proxy']
         env['HTTPS_PROXY'] = https_proxy_string unless env['HTTPS_PROXY']
       end
@@ -318,7 +326,7 @@ class Chef
     def configure_ftp_proxy
       if ftp_proxy = Chef::Config[:ftp_proxy]
         ftp_proxy_string = configure_proxy("ftp", ftp_proxy,
-                                           Chef::Config[:ftp_proxy_user], Chef::Config[:ftp_proxy_pass])
+          Chef::Config[:ftp_proxy_user], Chef::Config[:ftp_proxy_pass])
         env['ftp_proxy'] = ftp_proxy_string unless env['ftp_proxy']
         env['FTP_PROXY'] = ftp_proxy_string unless env['FTP_PROXY']
       end
@@ -370,6 +378,12 @@ class Chef
     # This is a hook for testing
     def env
       ENV
+    end
+
+    def emit_warnings
+      if Chef::Config[:chef_gem_compile_time]
+        Chef::Log.deprecation "setting chef_gem_compile_time to true is deprecated"
+      end
     end
 
     class << self

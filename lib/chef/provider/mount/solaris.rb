@@ -27,6 +27,8 @@ class Chef
     class Mount
       # Mount Solaris File systems
       class Solaris < Chef::Provider::Mount
+        provides :mount, platform: %w(openindiana opensolaris nexentacore omnios solaris2 smartos)
+
         extend Forwardable
 
         VFSTAB = '/etc/vfstab'.freeze
@@ -88,7 +90,7 @@ class Chef
           # FIXME: Should remount always do the remount or only if the options change?
           actual_options = options || []
           actual_options.delete('noauto')
-          mount_options = actual_options.empty? ? '' : ",#{actual_options.join(',')}" 
+          mount_options = actual_options.empty? ? '' : ",#{actual_options.join(',')}"
           shell_out!("mount -o remount#{mount_options} #{mount_point}")
         end
 

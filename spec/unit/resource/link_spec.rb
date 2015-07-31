@@ -36,7 +36,7 @@ describe Chef::Resource::Link do
   end
 
   it "should have a default action of 'create'" do
-    expect(@resource.action).to eql(:create)
+    expect(@resource.action).to eql([:create])
   end
 
   { :create => false, :delete => false, :blues => true }.each do |action,bad_value|
@@ -51,6 +51,21 @@ describe Chef::Resource::Link do
 
   it "should use the object name as the target_file by default" do
     expect(@resource.target_file).to eql("fakey_fakerton")
+  end
+
+  it "should accept a delayed evaluator as the target path" do
+    @resource.target_file Chef::DelayedEvaluator.new { "my_lazy_name" }
+    expect(@resource.target_file).to eql("my_lazy_name")
+  end
+
+  it "should accept a delayed evaluator when accessing via 'path'" do
+    @resource.target_file Chef::DelayedEvaluator.new { "my_lazy_name" }
+    expect(@resource.path).to eql("my_lazy_name")
+  end
+
+  it "should accept a delayed evaluator via 'to'" do
+    @resource.to Chef::DelayedEvaluator.new { "my_lazy_name" }
+    expect(@resource.to).to eql("my_lazy_name")
   end
 
   it "should accept a string as the link source via 'to'" do

@@ -356,6 +356,32 @@ EOM
         @ui.config[:attribute] = ["gi", "hi"]
         expect(@ui.format_for_display(input)).to eq({ "sample-data-bag-item" => { "gi" => "go", "hi"=> "ho" } })
       end
+
+      it "should handle attributes named the same as methods" do
+        input = { "keys" =>  "values", "hi" => "ho", "id" => "sample-data-bag-item" }
+        @ui.config[:attribute] = "keys"
+        expect(@ui.format_for_display(input)).to eq({ "sample-data-bag-item" => { "keys" => "values" } })
+      end
+
+      it "should handle nested attributes named the same as methods" do
+        input = { "keys" =>  {"keys" => "values"}, "hi" => "ho", "id" => "sample-data-bag-item" }
+        @ui.config[:attribute] = "keys.keys"
+        expect(@ui.format_for_display(input)).to eq({ "sample-data-bag-item" => { "keys.keys" => "values" } })
+      end
+
+      it "should return the name attribute" do
+        allow_any_instance_of(Chef::Node).to receive(:name).and_return("chef.localdomain")
+        input = Chef::Node.new
+        @ui.config[:attribute] = "name"
+        expect(@ui.format_for_display(input)).to eq( {"chef.localdomain"=>{"name"=>"chef.localdomain"} })
+      end
+
+      it "returns nil when given an attribute path that isn't a name or attribute" do
+        input = { "keys" =>  {"keys" => "values"}, "hi" => "ho", "id" => "sample-data-bag-item" }
+        non_existing_path = "nope.nada.nothingtoseehere"
+        @ui.config[:attribute] = non_existing_path
+        expect(@ui.format_for_display(input)).to eq({ "sample-data-bag-item" => { non_existing_path => nil } })
+      end
     end
 
     describe "with --run-list passed" do
@@ -408,7 +434,7 @@ EOM
       before(:each) do
         stdout = double('StringIO', :tty? => true)
         allow(@ui).to receive(:stdout).and_return(stdout)
-        allow(Chef::Platform).to receive(:windows?) { true }
+        allow(ChefConfig).to receive(:windows?) { true }
         Chef::Config.reset
       end
 

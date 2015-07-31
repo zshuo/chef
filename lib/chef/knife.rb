@@ -27,6 +27,7 @@ require 'chef/knife/core/subcommand_loader'
 require 'chef/knife/core/ui'
 require 'chef/local_mode'
 require 'chef/rest'
+require 'chef/http/authenticator'
 require 'pp'
 
 class Chef
@@ -53,6 +54,7 @@ class Chef
     def_delegator :@ui, :format_for_display
     def_delegator :@ui, :format_cookbook_list_for_display
     def_delegator :@ui, :edit_data
+    def_delegator :@ui, :edit_hash
     def_delegator :@ui, :edit_object
     def_delegator :@ui, :confirm
 
@@ -70,6 +72,11 @@ class Chef
 
     def self.msg(msg="")
       ui.msg(msg)
+    end
+
+    def self.reset_config_loader!
+      @@chef_config_dir = nil
+      @config_loader = nil
     end
 
     def self.reset_subcommands!
@@ -162,12 +169,15 @@ class Chef
     # Shared with subclasses
     @@chef_config_dir = nil
 
+    def self.config_loader
+      @config_loader ||= WorkstationConfigLoader.new(nil, Chef::Log)
+    end
+
     def self.load_config(explicit_config_file)
-      config_loader = WorkstationConfigLoader.new(explicit_config_file, Chef::Log)
+      config_loader.explicit_config_file = explicit_config_file
       config_loader.load
 
       ui.warn("No knife configuration file found") if config_loader.no_config_found?
-      @@chef_config_dir = config_loader.chef_config_dir
 
       config_loader
     rescue Exceptions::ConfigurationError => e
@@ -176,7 +186,7 @@ class Chef
     end
 
     def self.chef_config_dir
-      @@chef_config_dir
+      @@chef_config_dir ||= config_loader.chef_config_dir
     end
 
     # Run knife for the given +args+ (ARGV), adding +options+ to the list of
@@ -261,7 +271,8 @@ class Chef
         list_commands(category_commands)
       elsif missing_plugin = ( OFFICIAL_PLUGINS.find {|plugin| plugin == args[0]} )
         ui.info("The #{missing_plugin} commands were moved to plugins in Chef 0.10")
-        ui.info("You can install the plugin with `(sudo) gem install knife-#{missing_plugin}")
+        ui.info("You can install the plugin with `(sudo) gem install knife-#{missing_plugin}`")
+        ui.info("Use `chef gem install knife-#{missing_plugin}` instead if using ChefDK")
       else
         list_commands
       end
@@ -300,7 +311,7 @@ class Chef
         exit 1
       end
 
-      # copy Mixlib::CLI over so that it cab be configured in knife.rb
+      # copy Mixlib::CLI over so that it can be configured in knife.rb
       # config file
       Chef::Config[:verbosity] = config[:verbosity]
     end
@@ -348,7 +359,7 @@ class Chef
 
       case Chef::Config[:verbosity]
       when 0, nil
-        Chef::Config[:log_level] = :error
+        Chef::Config[:log_level] = :warn
       when 1
         Chef::Config[:log_level] = :info
       else
@@ -363,6 +374,9 @@ class Chef
       Chef::Config[:environment]       = config[:environment]     if config[:environment]
 
       Chef::Config.local_mode = config[:local_mode] if config.has_key?(:local_mode)
+
+      Chef::Config.listen = config[:listen] if config.has_key?(:listen)
+
       if Chef::Config.local_mode && !Chef::Config.has_key?(:cookbook_path) && !Chef::Config.has_key?(:chef_repo_path)
         Chef::Config.chef_repo_path = Chef::Config.find_chef_repo_path(Dir.pwd)
       end
@@ -387,6 +401,8 @@ class Chef
     end
 
     def configure_chef
+      # knife needs to send logger output to STDERR by default
+      Chef::Config[:log_location] = STDERR
       config_loader = self.class.load_config(config[:config_file])
       config[:config_file] = config_loader.config_location
 
@@ -420,6 +436,13 @@ class Chef
         raise # make sure exit passes through.
       when Net::HTTPServerException, Net::HTTPFatalError
         humanize_http_exception(e)
+      when OpenSSL::SSL::SSLError
+        ui.error "Could not establish a secure connection to the server."
+        ui.info "Use `knife ssl check` to troubleshoot your SSL configuration."
+        ui.info "If your Chef Server uses a self-signed certificate, you can use"
+        ui.info "`knife ssl fetch` to make knife trust the server's certificates."
+        ui.info ""
+        ui.info  "Original Exception: #{e.class.name}: #{e.message}"
       when Errno::ECONNREFUSED, Timeout::Error, Errno::ETIMEDOUT, SocketError
         ui.error "Network Error: #{e.message}"
         ui.info "Check your knife configuration and network settings"
@@ -463,6 +486,15 @@ class Chef
       when Net::HTTPServiceUnavailable
         ui.error "Service temporarily unavailable"
         ui.info "Response: #{format_rest_error(response)}"
+      when Net::HTTPNotAcceptable
+        version_header = Chef::JSONCompat.from_json(response["x-ops-server-api-version"])
+        client_api_version = version_header["request_version"]
+        min_server_version = version_header["min_version"]
+        max_server_version = version_header["max_version"]
+        ui.error "The version of Chef that Knife is using is not supported by the Chef server you sent this request to"
+        ui.info "The request that Knife sent was using API version #{client_api_version}"
+        ui.info "The Chef server you sent the request to supports a min API verson of #{min_server_version} and a max API version of #{max_server_version}"
+        ui.info "Please either update your Chef client or server to be a compatible set"
       else
         ui.error response.message
         ui.info "Response: #{format_rest_error(response)}"
@@ -517,6 +549,16 @@ class Chef
 
       obj_name = delete_name ? "#{delete_name}[#{name}]" : object
       self.msg("Deleted #{obj_name}")
+    end
+
+    # helper method for testing if a field exists
+    # and returning the usage and proper error if not
+    def test_mandatory_field(field, fieldname)
+      if field.nil?
+        show_usage
+        ui.fatal("You must specify a #{fieldname}")
+        exit 1
+      end
     end
 
     def rest

@@ -67,7 +67,7 @@ class Chef
         # BaseTsd.h: #ifdef (_WIN64) host.typedef int HALF_PTR; #else host.typedef short HALF_PTR;
         host.typedef :ulong,   :HACCEL # (L) Handle to an accelerator table. WinDef.h: #host.typedef HANDLE HACCEL;
         # See http://msdn.microsoft.com/en-us/library/ms645526%28VS.85%29.aspx
-        host.typedef :ulong,   :HANDLE # (L) Handle to an object. WinNT.h: #host.typedef PVOID HANDLE;
+        host.typedef :size_t,   :HANDLE # (L) Handle to an object. WinNT.h: #host.typedef PVOID HANDLE;
         # todo: Platform-dependent! Need to change to :uint64 for Win64
         host.typedef :ulong,   :HBITMAP # (L) Handle to a bitmap: http://msdn.microsoft.com/en-us/library/dd183377%28VS.85%29.aspx
         host.typedef :ulong,   :HBRUSH # (L) Handle to a brush. http://msdn.microsoft.com/en-us/library/dd183394%28VS.85%29.aspx
@@ -117,6 +117,7 @@ class Chef
         host.typedef :uint32,  :LCID # Locale identifier. For more information, see Locales.
         host.typedef :uint32,  :LCTYPE # Locale information type. For a list, see Locale Information Constants.
         host.typedef :uint32,  :LGRPID # Language group identifier. For a list, see EnumLanguageGroupLocales.
+        host.typedef :pointer, :LMSTR # Pointer to null termiated string of unicode characters
         host.typedef :long,    :LONG # 32-bit signed integer. The range is -2,147,483,648 through +...647 decimal.
         host.typedef :int32,   :LONG32 # 32-bit signed integer. The range is -2,147,483,648 through +...647 decimal.
         host.typedef :int64,   :LONG64 # 64-bit signed integer. The range is –9,223,372,036,854,775,808 through +...807
@@ -159,6 +160,7 @@ class Chef
         host.typedef :pointer, :PDWORD32 # Pointer to a DWORD32.
         host.typedef :pointer, :PDWORD64 # Pointer to a DWORD64.
         host.typedef :pointer, :PFLOAT # Pointer to a FLOAT.
+        host.typedef :pointer, :PGENERICMAPPING #Pointer to GENERIC_MAPPING
         host.typedef :pointer, :PHALF_PTR # Pointer to a HALF_PTR.
         host.typedef :pointer, :PHANDLE # Pointer to a HANDLE.
         host.typedef :pointer, :PHKEY # Pointer to an HKEY.
@@ -183,6 +185,8 @@ class Chef
         host.typedef :pointer, :PSTR # Pointer to a null-terminated string of 8-bit Windows (ANSI) characters. For more information, see Character Sets Used By Fonts.
         host.typedef :pointer, :PTBYTE # Pointer to a TBYTE.
         host.typedef :pointer, :PTCHAR # Pointer to a TCHAR.
+        host.typedef :pointer, :PCRYPTPROTECT_PROMPTSTRUCT # Pointer to a CRYPTOPROTECT_PROMPTSTRUCT.
+        host.typedef :pointer, :PDATA_BLOB # Pointer to a DATA_BLOB.
         host.typedef :pointer, :PTSTR # A PWSTR if UNICODE is defined, a PSTR otherwise.
         host.typedef :pointer, :PUCHAR # Pointer to a UCHAR.
         host.typedef :pointer, :PUHALF_PTR # Pointer to a UHALF_PTR.

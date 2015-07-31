@@ -20,12 +20,15 @@
 
 require 'chef/log'
 require 'chef/provider'
+require 'chef/provider/cron'
 
 class Chef
   class Provider
     class Cron
       class Unix < Chef::Provider::Cron
         include Chef::Mixin::ShellOut
+
+        provides :cron, os: 'solaris2'
 
         private
 

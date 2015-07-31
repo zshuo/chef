@@ -21,6 +21,11 @@ require 'spec_helper'
 require 'chef/api_client'
 require 'tempfile'
 
+# DEPRECATION NOTE
+#
+# This code will be removed in Chef 13 in favor of the code in Chef::ApiClientV1,
+# which will be moved to this namespace. New development should occur in
+# Chef::ApiClientV1 until the time before Chef 13.
 describe Chef::ApiClient do
   before(:each) do
     @client = Chef::ApiClient.new
@@ -123,49 +128,85 @@ describe Chef::ApiClient do
     it "does not include the private key if not present" do
       expect(@json).not_to include("private_key")
     end
-
-    include_examples "to_json equalivent to Chef::JSONCompat.to_json" do
-      let(:jsonable) { @client }
-    end
   end
 
-  describe "when deserializing from JSON" do
-    before(:each) do
-      client = {
-      "name" => "black",
-      "public_key" => "crowes",
-      "private_key" => "monkeypants",
-      "admin" => true,
-      "validator" => true,
-      "json_class" => "Chef::ApiClient"
-      }
-      @client = Chef::JSONCompat.from_json(Chef::JSONCompat.to_json(client))
+  describe "when deserializing from JSON (string) using ApiClient#from_json" do
+    let(:client_string) do
+      "{\"name\":\"black\",\"public_key\":\"crowes\",\"private_key\":\"monkeypants\",\"admin\":true,\"validator\":true}"
+    end
+
+    let(:client) do
+      Chef::ApiClient.from_json(client_string)
+    end
+
+    it "does not require a 'json_class' string" do
+      expect(Chef::JSONCompat.parse(client_string)["json_class"]).to eq(nil)
     end
 
     it "should deserialize to a Chef::ApiClient object" do
-      expect(@client).to be_a_kind_of(Chef::ApiClient)
+      expect(client).to be_a_kind_of(Chef::ApiClient)
     end
 
     it "preserves the name" do
-      expect(@client.name).to eq("black")
+      expect(client.name).to eq("black")
     end
 
     it "preserves the public key" do
-      expect(@client.public_key).to eq("crowes")
+      expect(client.public_key).to eq("crowes")
     end
 
     it "preserves the admin status" do
-      expect(@client.admin).to be_truthy
+      expect(client.admin).to be_truthy
     end
 
     it "preserves the 'validator' status" do
-      expect(@client.validator).to be_truthy
+      expect(client.validator).to be_truthy
     end
 
     it "includes the private key if present" do
-      expect(@client.private_key).to eq("monkeypants")
+      expect(client.private_key).to eq("monkeypants")
+    end
+  end
+
+  describe "when deserializing from JSON (hash) using JSONCompat#from_json" do
+    let(:client_hash) do
+      {
+        "name" => "black",
+        "public_key" => "crowes",
+        "private_key" => "monkeypants",
+        "admin" => true,
+        "validator" => true,
+        "json_class" => "Chef::ApiClient"
+      }
     end
 
+    let(:client) do
+      Chef::JSONCompat.from_json(Chef::JSONCompat.to_json(client_hash))
+    end
+
+    it "should deserialize to a Chef::ApiClient object" do
+      expect(client).to be_a_kind_of(Chef::ApiClient)
+    end
+
+    it "preserves the name" do
+      expect(client.name).to eq("black")
+    end
+
+    it "preserves the public key" do
+      expect(client.public_key).to eq("crowes")
+    end
+
+    it "preserves the admin status" do
+      expect(client.admin).to be_truthy
+    end
+
+    it "preserves the 'validator' status" do
+      expect(client.validator).to be_truthy
+    end
+
+    it "includes the private key if present" do
+      expect(client.private_key).to eq("monkeypants")
+    end
   end
 
   describe "when loading from JSON" do
@@ -182,8 +223,8 @@ describe Chef::ApiClient do
       "validator" => true,
       "json_class" => "Chef::ApiClient"
       }
-      @http_client = double("Chef::REST mock")
-      allow(Chef::REST).to receive(:new).and_return(@http_client)
+      @http_client = double("Chef::ServerAPI mock")
+      allow(Chef::ServerAPI).to receive(:new).and_return(@http_client)
       expect(@http_client).to receive(:get).with("clients/black").and_return(client)
       @client = Chef::ApiClient.load(client['name'])
     end
@@ -229,18 +270,13 @@ describe Chef::ApiClient do
       File.open(Chef::Config[:client_key], "r") {|f| f.read.chomp }
     end
 
-    it "has an HTTP client configured with default credentials" do
-      expect(@client.http_api).to be_a_kind_of(Chef::REST)
-      expect(@client.http_api.client_name).to eq("silent-bob")
-      expect(@client.http_api.signing_key.to_s).to eq(private_key_data)
-    end
   end
 
 
   describe "when requesting a new key" do
     before do
       @http_client = double("Chef::REST mock")
-      allow(Chef::REST).to receive(:new).and_return(@http_client)
+      allow(Chef::ServerAPI).to receive(:new).and_return(@http_client)
     end
 
     context "and the client does not exist on the server" do
@@ -306,5 +342,3 @@ describe Chef::ApiClient do
     end
   end
 end
-
-

@@ -20,12 +20,26 @@ require 'spec_helper'
 
 require 'chef/http'
 require 'chef/http/basic_client'
+require 'chef/http/socketless_chef_zero_client'
 
 class Chef::HTTP
   public :create_url
 end
 
 describe Chef::HTTP do
+
+  context "when given a chefzero:// URL" do
+
+    let(:uri) { URI("chefzero://localhost:1") }
+
+    subject(:http) { Chef::HTTP.new(uri) }
+
+    it "uses the SocketlessChefZeroClient to handle requests" do
+      expect(http.http_client).to be_a_kind_of(Chef::HTTP::SocketlessChefZeroClient)
+      expect(http.http_client.url).to eq(uri)
+    end
+
+  end
 
   describe "create_url" do
 
@@ -42,6 +56,13 @@ describe Chef::HTTP do
     it 'should return a correctly formatted url 3/3 CHEF-5261' do
       http = Chef::HTTP.new('http://www.getchef.com/organization/org///')
       expect(http.create_url('///api/endpoint?url=http://foo.bar')).to eql(URI.parse('http://www.getchef.com/organization/org/api/endpoint?url=http://foo.bar'))
+    end
+
+    # As per: https://github.com/opscode/chef/issues/2500
+    it 'should treat scheme part of the URI in a case-insensitive manner' do
+      http = Chef::HTTP.allocate # Calling Chef::HTTP::new sets @url, don't want that.
+      expect { http.create_url('HTTP://www1.chef.io/') }.not_to raise_error
+      expect(http.create_url('HTTP://www2.chef.io/')).to eql(URI.parse('http://www2.chef.io/'))
     end
 
   end # create_url

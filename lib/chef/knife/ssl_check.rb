@@ -73,11 +73,12 @@ class Chef
         exit 1
       end
 
-
       def verify_peer_socket
         @verify_peer_socket ||= begin
           tcp_connection = TCPSocket.new(host, port)
-          OpenSSL::SSL::SSLSocket.new(tcp_connection, verify_peer_ssl_context)
+          ssl_client = OpenSSL::SSL::SSLSocket.new(tcp_connection, verify_peer_ssl_context)
+          ssl_client.hostname = host
+          ssl_client
         end
       end
 
@@ -162,7 +163,7 @@ We are working on documentation for resolving common issues uncovered here.
 server's certificate. By default, the certificate is stored in the following
 location on the host where your chef-server runs:
 
-  /var/opt/chef-server/nginx/ca/SERVER_HOSTNAME.crt
+  /var/opt/opscode/nginx/ca/SERVER_HOSTNAME.crt
 
 Copy that file to your trusted_certs_dir (currently: #{configuration.trusted_certs_dir})
 using SSH/SCP or some other secure method, then re-run this command to confirm
@@ -191,7 +192,7 @@ configure chef to trust that server's certificate.
 By default, the certificate is stored in the following location on the host
 where your chef-server runs:
 
-  /var/opt/chef-server/nginx/ca/SERVER_HOSTNAME.crt
+  /var/opt/opscode/nginx/ca/SERVER_HOSTNAME.crt
 
 Copy that file to your trusted_certs_dir (currently: #{configuration.trusted_certs_dir})
 using SSH/SCP or some other secure method, then re-run this command to confirm

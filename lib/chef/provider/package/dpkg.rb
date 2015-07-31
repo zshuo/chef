@@ -61,12 +61,12 @@ class Chef
             if @source_exists
               # Get information from the package if supplied
               Chef::Log.debug("#{@new_resource} checking dpkg status")
-              status = popen4("dpkg-deb -W #{@new_resource.source}") do |pid, stdin, stdout, stderr|
-                stdout.each_line do |line|
-                  if pkginfo = DPKG_INFO.match(line)
-                    @current_resource.package_name(pkginfo[1])
-                    @new_resource.version(pkginfo[2])
-                  end
+
+              shell_out_with_timeout("dpkg-deb -W #{@new_resource.source}").stdout.each_line do |line|
+                if pkginfo = DPKG_INFO.match(line)
+                  @current_resource.package_name(pkginfo[1])
+                  @new_resource.version(pkginfo[2])
+                  @candidate_version = pkginfo[2]
                 end
               end
             else
@@ -79,16 +79,15 @@ class Chef
           # Check to see if it is installed
           package_installed = nil
           Chef::Log.debug("#{@new_resource} checking install state")
-          status = popen4("dpkg -s #{@current_resource.package_name}") do |pid, stdin, stdout, stderr|
-            stdout.each_line do |line|
-              case line
-              when DPKG_INSTALLED
-                package_installed = true
-              when DPKG_VERSION
-                if package_installed
-                  Chef::Log.debug("#{@new_resource} current version is #{$1}")
-                  @current_resource.version($1)
-                end
+          status = shell_out_with_timeout("dpkg -s #{@current_resource.package_name}")
+          status.stdout.each_line do |line|
+            case line
+            when DPKG_INSTALLED
+              package_installed = true
+            when DPKG_VERSION
+              if package_installed
+                Chef::Log.debug("#{@new_resource} current version is #{$1}")
+                @current_resource.version($1)
               end
             end
           end
@@ -135,13 +134,13 @@ class Chef
           run_noninteractive("dpkg-reconfigure #{name}")
         end
 
-        # Runs command via shell_out with magic environment to disable
+        # Runs command via shell_out_with_timeout with magic environment to disable
         # interactive prompts. Command is run with default localization rather
         # than forcing locale to "C", so command output may not be stable.
         #
         # FIXME: This should be "LC_ALL" => "en_US.UTF-8" in order to stabilize the output and get UTF-8
         def run_noninteractive(command)
-          shell_out!(command, :env => { "DEBIAN_FRONTEND" => "noninteractive", "LC_ALL" => nil })
+          shell_out_with_timeout!(command, :env => { "DEBIAN_FRONTEND" => "noninteractive", "LC_ALL" => nil })
         end
 
       end

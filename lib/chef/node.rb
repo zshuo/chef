@@ -47,6 +47,8 @@ class Chef
 
     attr_accessor :recipe_list, :run_state, :override_runlist
 
+    attr_accessor :chef_server_rest
+
     # RunContext will set itself as run_context via this setter when
     # initialized. This is needed so DSL::IncludeAttribute (in particular,
     # #include_recipe) can access the run_context to determine if an attributes
@@ -62,7 +64,8 @@ class Chef
     include Chef::Mixin::ParamsValidate
 
     # Create a new Chef::Node object.
-    def initialize
+    def initialize(chef_server_rest: nil)
+      @chef_server_rest = chef_server_rest
       @name = nil
 
       @chef_environment = '_default'
@@ -74,13 +77,30 @@ class Chef
       @run_state = {}
     end
 
+    # after the run_context has been set on the node, go through the cookbook_collection
+    # and setup the node[:cookbooks] attribute so that it is published in the node object
+    def set_cookbook_attribute
+      return unless run_context.cookbook_collection
+      run_context.cookbook_collection.each do |cookbook_name, cookbook|
+        automatic_attrs[:cookbooks][cookbook_name][:version] = cookbook.version
+      end
+    end
+
     # Used by DSL
     def node
       self
     end
 
     def chef_server_rest
-      Chef::REST.new(Chef::Config[:chef_server_url])
+      # for saving node data we use validate_utf8: false which will not
+      # raise an exception on bad utf8 data, but will replace the bad
+      # characters and render valid JSON.
+      @chef_server_rest ||= Chef::REST.new(
+        Chef::Config[:chef_server_url],
+        Chef::Config[:node_name],
+        Chef::Config[:client_key],
+        validate_utf8: false,
+      )
     end
 
     # Set the name of this Node, or return the current name.
@@ -241,6 +261,7 @@ class Chef
     # saved back to the node and be searchable
     def loaded_recipe(cookbook, recipe)
       fully_qualified_recipe = "#{cookbook}::#{recipe}"
+
       automatic_attrs[:recipes] << fully_qualified_recipe unless Array(self[:recipes]).include?(fully_qualified_recipe)
     end
 
@@ -294,6 +315,7 @@ class Chef
     # Consumes the combined run_list and other attributes in +attrs+
     def consume_attributes(attrs)
       normal_attrs_to_merge = consume_run_list(attrs)
+      normal_attrs_to_merge = consume_chef_environment(normal_attrs_to_merge)
       Chef::Log.debug("Applying attributes from json file")
       self.normal_attrs = Chef::Mixin::DeepMerge.merge(normal_attrs,normal_attrs_to_merge)
       self.tags # make sure they're defined
@@ -320,8 +342,26 @@ class Chef
         if attrs.key?("recipes") || attrs.key?("run_list")
           raise Chef::Exceptions::AmbiguousRunlistSpecification, "please set the node's run list using the 'run_list' attribute only."
         end
-        Chef::Log.info("Setting the run_list to #{new_run_list.inspect} from CLI options")
+        Chef::Log.info("Setting the run_list to #{new_run_list.to_s} from CLI options")
         run_list(new_run_list)
+      end
+      attrs
+    end
+
+    # chef_environment when set in -j JSON will take precedence over
+    # -E ENVIRONMENT. Ideally, IMO, the order of precedence should be (lowest to
+    #  highest):
+    #   config_file
+    #   -j JSON
+    #   -E ENVIRONMENT
+    # so that users could reuse their JSON and override the chef_environment
+    # configured within it with -E ENVIRONMENT. Because command line options are
+    # merged with Chef::Config there is currently no way to distinguish between
+    # an environment set via config from an environment set via command line.
+    def consume_chef_environment(attrs)
+      attrs = attrs ? attrs.dup : {}
+      if env = attrs.delete("chef_environment")
+        chef_environment(env)
       end
       attrs
     end
@@ -351,7 +391,8 @@ class Chef
 
       self.tags # make sure they're defined
 
-      automatic_attrs[:recipes] = expansion.recipes
+      automatic_attrs[:recipes] = expansion.recipes.with_fully_qualified_names_and_version_constraints
+      automatic_attrs[:expanded_run_list] = expansion.recipes.with_fully_qualified_names_and_version_constraints
       automatic_attrs[:roles] = expansion.roles
 
       apply_expansion_attributes(expansion)

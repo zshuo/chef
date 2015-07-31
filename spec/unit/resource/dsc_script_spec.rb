@@ -29,7 +29,7 @@ describe Chef::Resource::DscScript do
       Chef::RunContext.new(node, {}, empty_events)
     }
     let(:dsc_test_resource) {
-      Chef::Resource::DscScript.new(dsc_test_resource_name, dsc_test_run_context) 
+      Chef::Resource::DscScript.new(dsc_test_resource_name, dsc_test_run_context)
     }
     let(:configuration_code) {'echo "This is supposed to create a configuration document."'}
     let(:configuration_path) {'c:/myconfigs/formatc.ps1'}
@@ -38,7 +38,7 @@ describe Chef::Resource::DscScript do
     let(:configuration_data_script) { 'c:/myconfigs/data/safedata.psd1' }
 
     it "has a default action of `:run`" do
-      expect(dsc_test_resource.action).to eq(:run)
+      expect(dsc_test_resource.action).to eq([:run])
     end
 
     it "has an allowed_actions attribute with only the `:run` and `:nothing` attributes" do
@@ -68,6 +68,38 @@ describe Chef::Resource::DscScript do
     it "allows the configuration_data_script attribute to be set" do
       dsc_test_resource.configuration_data_script(configuration_data_script)
       expect(dsc_test_resource.configuration_data_script).to eq(configuration_data_script)
+    end
+
+    context "when calling imports" do
+      let(:module_name)   { 'FooModule' }
+      let(:module_name_b)   { 'BarModule' }
+      let(:dsc_resources) { ['ResourceA', 'ResourceB'] }
+
+      it "allows an arbitrary number of resources to be set for a module to be set" do
+        dsc_test_resource.imports module_name, *dsc_resources
+        module_imports = dsc_test_resource.imports[module_name]
+        expect(module_imports).to eq(dsc_resources)
+      end
+
+      it "adds * to the imports when no resources are set for a moudle" do
+        dsc_test_resource.imports module_name
+        module_imports = dsc_test_resource.imports[module_name]
+        expect(module_imports).to eq(['*'])
+      end
+
+      it "allows an arbitrary number of modules" do
+        dsc_test_resource.imports module_name
+        dsc_test_resource.imports module_name_b
+        expect(dsc_test_resource.imports).to have_key(module_name)
+        expect(dsc_test_resource.imports).to have_key(module_name_b)
+      end
+
+      it "allows resources to be added for a module" do
+        dsc_test_resource.imports module_name, dsc_resources[0]
+        dsc_test_resource.imports module_name, dsc_resources[1]
+        module_imports = dsc_test_resource.imports[module_name]
+        expect(module_imports).to eq(dsc_resources)
+      end
     end
 
     it "raises an ArgumentError exception if an attempt is made to set the code attribute when the command attribute is already set" do

@@ -611,6 +611,37 @@ describe Chef::Node do
       end
     end
 
+    # In Chef-12.0 there is a deep_merge cache on the top level attribute which had a bug
+    # where it cached node[:foo] separate from node['foo'].  These tests exercise those edge conditions.
+    #
+    # https://github.com/opscode/chef/issues/2700
+    # https://github.com/opscode/chef/issues/2712
+    # https://github.com/opscode/chef/issues/2745
+    #
+    describe "deep merge attribute cache edge conditions" do
+      it "does not error with complicated attribute substitution" do
+        node.default['chef_attribute_hell']['attr1'] = "attribute1"
+        node.default['chef_attribute_hell']['attr2'] = "#{node.chef_attribute_hell.attr1}/attr2"
+        expect { node.default['chef_attribute_hell']['attr3'] = "#{node.chef_attribute_hell.attr2}/attr3" }.not_to raise_error
+      end
+
+      it "caches both strings and symbols correctly" do
+        node.force_default[:solr][:version] = '4.10.2'
+        node.force_default[:solr][:data_dir] = "/opt/solr-#{node['solr'][:version]}/example/solr"
+        node.force_default[:solr][:xms] = "512M"
+        expect(node[:solr][:xms]).to eql("512M")
+        expect(node['solr'][:xms]).to eql("512M")
+      end
+
+      it "method interpolation syntax also works" do
+        node.default['passenger']['version']     = '4.0.57'
+        node.default['passenger']['root_path']   = "passenger-#{node['passenger']['version']}"
+        node.default['passenger']['root_path_2'] = "passenger-#{node.passenger['version']}"
+        expect(node['passenger']['root_path_2']).to eql("passenger-4.0.57")
+        expect(node[:passenger]['root_path_2']).to eql("passenger-4.0.57")
+      end
+    end
+
     it "should raise an ArgumentError if you ask for an attribute that doesn't exist via method_missing" do
       expect { node.sunshine }.to raise_error(NoMethodError)
     end
@@ -639,6 +670,13 @@ describe Chef::Node do
       attrs = {"run_list" => [ "role[base]", "recipe[chef::server]" ], "foo" => "bar"}
       expect(node.consume_run_list(attrs)).to eq({"foo" => "bar"})
       expect(node.run_list).to eq([ "role[base]", "recipe[chef::server]" ])
+    end
+
+    it "sets the node chef_environment" do
+      attrs = { "chef_environment" => "foo_environment", "bar" => "baz" }
+      expect(node.consume_chef_environment(attrs)).to eq({ "bar" => "baz" })
+      expect(node.chef_environment).to eq("foo_environment")
+      expect(node['chef_environment']).to be nil
     end
 
     it "should overwrites the run list with the run list it consumes" do
@@ -1075,7 +1113,7 @@ describe Chef::Node do
       expect(serialized_node.run_list).to eq(node.run_list)
     end
 
-    include_examples "to_json equalivent to Chef::JSONCompat.to_json" do
+    include_examples "to_json equivalent to Chef::JSONCompat.to_json" do
       let(:jsonable) {
         node.from_file(File.expand_path("nodes/test.example.com.rb", CHEF_SPEC_DATA))
         node
@@ -1210,6 +1248,40 @@ describe Chef::Node do
           node.name("picky-monkey")
           allow(node).to receive(:for_json).and_return(data)
           expect(@rest).to receive(:put_rest).with("nodes/picky-monkey", selected_data).and_return("foo")
+          node.save
+        end
+
+        it "should save false-y whitelisted attributes" do
+          Chef::Config[:default_attribute_whitelist] = [
+            "foo/bar/baz"
+          ]
+
+          data = {
+            "default" => {
+              "foo" => {
+                "bar" => {
+                  "baz" => false,
+                },
+                "other" => {
+                  "stuff" => true,
+                }
+              }
+            }
+          }
+
+          selected_data = {
+            "default" => {
+              "foo" => {
+                "bar" => {
+                  "baz" => false,
+                }
+              }
+            }
+          }
+
+          node.name("falsey-monkey")
+          allow(node).to receive(:for_json).and_return(data)
+          expect(@rest).to receive(:put_rest).with("nodes/falsey-monkey", selected_data).and_return("foo")
           node.save
         end
 

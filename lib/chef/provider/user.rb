@@ -23,7 +23,6 @@ require 'etc'
 class Chef
   class Provider
     class User < Chef::Provider
-
       include Chef::Mixin::Command
 
       attr_accessor :user_exists, :locked
@@ -67,7 +66,7 @@ class Chef
           @current_resource.shell(user_info.shell)
           @current_resource.password(user_info.passwd)
 
-          if @new_resource.comment && user_info.gecos.respond_to?(:force_encoding)
+          if @new_resource.comment
             user_info.gecos.force_encoding(@new_resource.comment.encoding)
           end
           @current_resource.comment(user_info.gecos)
@@ -208,7 +207,6 @@ class Chef
       def unlock_user
         raise NotImplementedError
       end
-
     end
   end
 end

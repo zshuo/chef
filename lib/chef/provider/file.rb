@@ -26,8 +26,10 @@ require 'fileutils'
 require 'chef/scan_access_control'
 require 'chef/mixin/checksum'
 require 'chef/mixin/file_class'
+require 'chef/mixin/enforce_ownership_and_permissions'
 require 'chef/util/backup'
 require 'chef/util/diff'
+require 'chef/util/selinux'
 require 'chef/deprecation/provider/file'
 require 'chef/deprecation/warnings'
 require 'chef/file_content_management/deploy'
@@ -345,6 +347,14 @@ class Chef
         if new_resource.checksum && tempfile && ( new_resource.checksum != tempfile_checksum )
           raise Chef::Exceptions::ChecksumMismatch.new(short_cksum(new_resource.checksum), short_cksum(tempfile_checksum))
         end
+
+        if tempfile
+          new_resource.verify.each do |v|
+            if ! v.verify(tempfile.path)
+              raise Chef::Exceptions::ValidationFailed.new "Proposed content for #{new_resource.path} failed verification #{v}"
+            end
+          end
+        end
       end
 
       def do_unlink
@@ -378,10 +388,11 @@ class Chef
 
       def update_file_contents
         do_backup unless needs_creating?
-        deployment_strategy.deploy(tempfile.path, ::File.realpath(@new_resource.path))
-        Chef::Log.info("#{@new_resource} updated file contents #{@new_resource.path}")
+        deployment_strategy.deploy(tempfile.path, ::File.realpath(new_resource.path))
+        Chef::Log.info("#{new_resource} updated file contents #{new_resource.path}")
         if managing_content?
-          @new_resource.checksum(checksum(@new_resource.path)) # for reporting
+          # save final checksum for reporting.
+          new_resource.final_checksum = checksum(new_resource.path)
         end
       end
 

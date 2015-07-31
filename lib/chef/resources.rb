@@ -29,6 +29,7 @@ require 'chef/resource/deploy_revision'
 require 'chef/resource/directory'
 require 'chef/resource/dpkg_package'
 require 'chef/resource/dsc_script'
+require 'chef/resource/dsc_resource'
 require 'chef/resource/easy_install_package'
 require 'chef/resource/env'
 require 'chef/resource/erl_call'
@@ -79,6 +80,7 @@ require 'chef/resource/windows_package'
 require 'chef/resource/yum_package'
 require 'chef/resource/lwrp_base'
 require 'chef/resource/bff_package'
+require 'chef/resource/zypper_package'
 
 begin
   # Optional resources chef_node, chef_client, machine, machine_image, etc.

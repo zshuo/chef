@@ -119,6 +119,7 @@ class Chef
 
         @node = Chef::Node.find_or_create(node_name)
         validate_policyfile
+        events.policyfile_loaded(policy)
         node
       rescue Exception => e
         events.node_load_failed(node_name, e, Chef::Config)
@@ -237,7 +238,12 @@ class Chef
       end
 
       def policyfile_location
-        "data/policyfiles/#{deployment_group}"
+        if Chef::Config[:policy_document_native_api]
+          validate_policy_config!
+          "policy_groups/#{policy_group}/policies/#{policy_name}"
+        else
+          "data/policyfiles/#{deployment_group}"
+        end
       end
 
       # Do some mimimal validation of the policyfile we fetched from the
@@ -281,6 +287,22 @@ class Chef
           raise ConfigurationError, "Setting `deployment_group` is not configured."
       end
 
+      def validate_policy_config!
+        policy_group or
+          raise ConfigurationError, "Setting `policy_group` is not configured."
+
+        policy_name or
+          raise ConfigurationError, "Setting `policy_name` is not configured."
+      end
+
+      def policy_group
+        Chef::Config[:policy_group]
+      end
+
+      def policy_name
+        Chef::Config[:policy_name]
+      end
+
       # Builds a 'cookbook_hash' map of the form
       #   "COOKBOOK_NAME" => "IDENTIFIER"
       #
@@ -314,13 +336,11 @@ class Chef
       # cookbooks are fetched by the "dotted_decimal_identifier": a
       # representation of a SHA1 in the traditional x.y.z version format.
       def manifest_for(cookbook_name, lock_data)
-        xyz_version = lock_data["dotted_decimal_identifier"]
-        http_api.get("cookbooks/#{cookbook_name}/#{xyz_version}")
-      rescue Exception => e
-        message = "Error loading cookbook #{cookbook_name} at version #{xyz_version}: #{e.class} - #{e.message}"
-        err = Chef::Exceptions::CookbookNotFound.new(message)
-        err.set_backtrace(e.backtrace)
-        raise err
+        if Chef::Config[:policy_document_native_api]
+          artifact_manifest_for(cookbook_name, lock_data)
+        else
+          compat_mode_manifest_for(cookbook_name, lock_data)
+        end
       end
 
       def cookbook_locks
@@ -335,7 +355,34 @@ class Chef
         Chef::Config
       end
 
+      private
+
+      def compat_mode_manifest_for(cookbook_name, lock_data)
+        xyz_version = lock_data["dotted_decimal_identifier"]
+        rel_url = "cookbooks/#{cookbook_name}/#{xyz_version}"
+        http_api.get(rel_url)
+      rescue Exception => e
+        message = "Error loading cookbook #{cookbook_name} at version #{xyz_version} from #{rel_url}: #{e.class} - #{e.message}"
+        err = Chef::Exceptions::CookbookNotFound.new(message)
+        err.set_backtrace(e.backtrace)
+        raise err
+      end
+
+      def artifact_manifest_for(cookbook_name, lock_data)
+        identifier = lock_data["identifier"]
+        rel_url = "cookbook_artifacts/#{cookbook_name}/#{identifier}"
+        inflate_cbv_object(http_api.get(rel_url))
+      rescue Exception => e
+        message = "Error loading cookbook #{cookbook_name} with identifier #{identifier} from #{rel_url}: #{e.class} - #{e.message}"
+        err = Chef::Exceptions::CookbookNotFound.new(message)
+        err.set_backtrace(e.backtrace)
+        raise err
+      end
+
+      def inflate_cbv_object(raw_manifest)
+        Chef::CookbookVersion.from_cb_artifact_data(raw_manifest)
+      end
+
     end
   end
 end
-

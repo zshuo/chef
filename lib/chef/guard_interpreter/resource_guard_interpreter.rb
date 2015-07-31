@@ -16,7 +16,7 @@
 # limitations under the License.
 #
 
-require 'chef/guard_interpreter/default_guard_interpreter'
+require 'chef/guard_interpreter'
 
 class Chef
   class GuardInterpreter
@@ -41,7 +41,7 @@ class Chef
         # attribute by checking the type of the resources.
         # We need to make sure we check for Script first because any resource
         # that can get to here is an Execute resource.
-        if @parent_resource.is_a? Chef::Resource::Script
+        if @resource.is_a? Chef::Resource::Script
           block_attributes = @command_opts.merge({:code => @command})
         else
           block_attributes = @command_opts.merge({:command => @command})
@@ -68,7 +68,10 @@ class Chef
         run_action = action || @resource.action
 
         begin
-          @resource.run_action(run_action)
+          # Coerce to an array to be safe. This could happen with a legacy
+          # resource or something overriding the default_action code in a
+          # subclass.
+          Array(run_action).each {|action_to_run| @resource.run_action(action_to_run) }
           resource_updated = @resource.updated
         rescue Mixlib::ShellOut::ShellCommandFailed
           resource_updated = nil
@@ -92,9 +95,13 @@ class Chef
           raise ArgumentError, "Specified guard interpreter class #{resource_class} must be a kind of Chef::Resource::Execute resource"
         end
 
+        # Duplicate the node below because the new RunContext
+        # overwrites the state of Node instances passed to it.
+        # See https://github.com/chef/chef/issues/3485.
         empty_events = Chef::EventDispatch::Dispatcher.new
-        anonymous_run_context = Chef::RunContext.new(parent_resource.node, {}, empty_events)
+        anonymous_run_context = Chef::RunContext.new(parent_resource.node.dup, {}, empty_events)
         interpreter_resource = resource_class.new('Guard resource', anonymous_run_context)
+        interpreter_resource.is_guard_interpreter = true
 
         interpreter_resource
       end

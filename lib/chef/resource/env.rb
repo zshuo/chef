@@ -25,14 +25,16 @@ class Chef
 
       state_attrs :value
 
+      provides :env, os: "windows"
+
+      default_action :create
+      allowed_actions :create, :delete, :modify
+
       def initialize(name, run_context=nil)
         super
-        @resource_name = :env
         @key_name = name
         @value = nil
-        @action = :create
         @delim = nil
-        @allowed_actions.push(:create, :delete, :modify)
       end
 
       def key_name(arg=nil)

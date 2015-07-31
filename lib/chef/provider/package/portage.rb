@@ -25,6 +25,10 @@ class Chef
   class Provider
     class Package
       class Portage < Chef::Provider::Package
+
+        provides :package, platform: "gentoo"
+        provides :portage_package
+
         PACKAGE_NAME_PATTERN = %r{(?:([^/]+)/)?([^/]+)}
 
         def load_current_resource
@@ -92,10 +96,9 @@ class Chef
         def candidate_version
           return @candidate_version if @candidate_version
 
-          status = popen4("emerge --color n --nospinner --search #{@new_resource.package_name.split('/').last}") do |pid, stdin, stdout, stderr|
-            available, installed = parse_emerge(@new_resource.package_name, stdout.read)
-            @candidate_version = available
-          end
+          status = shell_out("emerge --color n --nospinner --search #{@new_resource.package_name.split('/').last}")
+          available, installed = parse_emerge(@new_resource.package_name, status.stdout)
+          @candidate_version = available
 
           unless status.exitstatus == 0
             raise Chef::Exceptions::Package, "emerge --search failed - #{status.inspect}!"

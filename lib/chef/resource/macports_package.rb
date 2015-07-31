@@ -16,16 +16,11 @@
 # limitations under the License.
 #
 
+require 'chef/resource/package'
+
 class Chef
   class Resource
     class MacportsPackage < Chef::Resource::Package
-
-      provides :macports_package, os: "mac_os_x"
-
-      def initialize(name, run_context=nil)
-        super
-        @resource_name = :macports_package
-      end
     end
   end
 end

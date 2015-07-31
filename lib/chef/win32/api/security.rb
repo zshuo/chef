@@ -193,6 +193,20 @@ class Chef
 
         MAXDWORD = 0xffffffff
 
+        # LOGON32 constants for LogonUser
+        LOGON32_LOGON_INTERACTIVE = 2;
+        LOGON32_LOGON_NETWORK = 3;
+        LOGON32_LOGON_BATCH = 4;
+        LOGON32_LOGON_SERVICE = 5;
+        LOGON32_LOGON_UNLOCK = 7;
+        LOGON32_LOGON_NETWORK_CLEARTEXT = 8;
+        LOGON32_LOGON_NEW_CREDENTIALS = 9;
+
+        LOGON32_PROVIDER_DEFAULT = 0;
+        LOGON32_PROVIDER_WINNT35 = 1;
+        LOGON32_PROVIDER_WINNT40 = 2;
+        LOGON32_PROVIDER_WINNT50 = 3;
+
         ###############################################
         # Win32 API Bindings
         ###############################################
@@ -270,6 +284,23 @@ class Chef
              :MaxTokenInfoClass
         ]
 
+        class TOKEN_OWNER < FFI::Struct
+          layout :Owner, :pointer
+        end
+
+        class TOKEN_PRIMARY_GROUP < FFI::Struct
+          layout :PrimaryGroup, :pointer
+        end
+
+        # https://msdn.microsoft.com/en-us/library/windows/desktop/aa379572%28v=vs.85%29.aspx
+        SECURITY_IMPERSONATION_LEVEL = enum :SECURITY_IMPERSONATION_LEVEL, [
+             :SecurityAnonymous,
+             :SecurityIdentification,
+             :SecurityImpersonation,
+             :SecurityDelegation
+        ]
+
+
         # SECURITY_DESCRIPTOR is an opaque structure whose contents can vary.  Pass the
         # pointer around and free it with LocalFree.
         # http://msdn.microsoft.com/en-us/library/windows/desktop/aa379561(v=vs.85).aspx
@@ -320,6 +351,19 @@ class Chef
                  :Attributes, :DWORD
         end
 
+        class GENERIC_MAPPING < FFI::Struct
+          layout :GenericRead, :DWORD,
+            :GenericWrite, :DWORD,
+            :GenericExecute, :DWORD,
+            :GenericAll, :DWORD
+        end
+
+        class PRIVILEGE_SET < FFI::Struct
+          layout :PrivilegeCount, :DWORD,
+                 :Control, :DWORD,
+                 :Privilege, [LUID_AND_ATTRIBUTES, 1]
+        end
+
         class TOKEN_PRIVILEGES < FFI::Struct
           layout :PrivilegeCount, :DWORD,
                  :Privileges, LUID_AND_ATTRIBUTES
@@ -339,6 +383,7 @@ class Chef
 
         ffi_lib "advapi32"
 
+        safe_attach_function :AccessCheck, [:pointer, :HANDLE, :DWORD, :pointer, :pointer, :pointer, :pointer, :pointer], :BOOL
         safe_attach_function :AddAce, [ :pointer, :DWORD, :DWORD, :LPVOID, :DWORD ], :BOOL
         safe_attach_function :AddAccessAllowedAce, [ :pointer, :DWORD, :DWORD, :pointer ], :BOOL
         safe_attach_function :AddAccessAllowedAceEx, [ :pointer, :DWORD, :DWORD, :DWORD, :pointer ], :BOOL
@@ -348,9 +393,11 @@ class Chef
         safe_attach_function :ConvertSidToStringSidA, [ :pointer, :pointer ], :BOOL
         safe_attach_function :ConvertStringSidToSidW, [ :pointer, :pointer ], :BOOL
         safe_attach_function :DeleteAce, [ :pointer, :DWORD ], :BOOL
+        safe_attach_function :DuplicateToken, [:HANDLE, :SECURITY_IMPERSONATION_LEVEL, :PHANDLE], :BOOL
         safe_attach_function :EqualSid, [ :pointer, :pointer ], :BOOL
         safe_attach_function :FreeSid, [ :pointer ], :pointer
         safe_attach_function :GetAce, [ :pointer, :DWORD, :pointer ], :BOOL
+        safe_attach_function :GetFileSecurityW, [:LPCWSTR, :DWORD, :pointer, :DWORD, :pointer], :BOOL
         safe_attach_function :GetLengthSid, [ :pointer ], :DWORD
         safe_attach_function :GetNamedSecurityInfoW,  [ :LPWSTR, :SE_OBJECT_TYPE, :DWORD, :pointer, :pointer, :pointer, :pointer, :pointer ], :DWORD
         safe_attach_function :GetSecurityDescriptorControl, [ :pointer, :PWORD, :LPDWORD], :BOOL
@@ -369,6 +416,7 @@ class Chef
         safe_attach_function :LookupPrivilegeDisplayNameW, [ :LPCWSTR, :LPCWSTR, :LPWSTR, :LPDWORD, :LPDWORD ], :BOOL
         safe_attach_function :LookupPrivilegeValueW, [ :LPCWSTR, :LPCWSTR, :PLUID ], :BOOL
         safe_attach_function :MakeAbsoluteSD, [ :pointer, :pointer, :LPDWORD, :pointer, :LPDWORD, :pointer, :LPDWORD, :pointer, :LPDWORD, :pointer, :LPDWORD], :BOOL
+        safe_attach_function :MapGenericMask, [ :PDWORD, :PGENERICMAPPING ], :void
         safe_attach_function :OpenProcessToken, [ :HANDLE, :DWORD, :PHANDLE ], :BOOL
         safe_attach_function :QuerySecurityAccessMask, [ :DWORD, :LPDWORD ], :void
         safe_attach_function :SetFileSecurityW, [ :LPWSTR, :DWORD, :pointer ], :BOOL
@@ -379,6 +427,8 @@ class Chef
         safe_attach_function :SetSecurityDescriptorOwner, [ :pointer, :pointer, :BOOL ], :BOOL
         safe_attach_function :SetSecurityDescriptorSacl, [ :pointer, :BOOL, :pointer, :BOOL ], :BOOL
         safe_attach_function :GetTokenInformation, [ :HANDLE, :TOKEN_INFORMATION_CLASS, :pointer, :DWORD, :PDWORD ], :BOOL
+        safe_attach_function :LogonUserW, [:LPTSTR, :LPTSTR, :LPTSTR, :DWORD, :DWORD, :PHANDLE], :BOOL
+
       end
     end
   end

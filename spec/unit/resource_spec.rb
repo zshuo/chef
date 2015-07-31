@@ -21,10 +21,6 @@
 
 require 'spec_helper'
 
-class ResourceTestHarness < Chef::Resource
-  provider_base Chef::Provider::Package
-end
-
 describe Chef::Resource do
   before(:each) do
     @cookbook_repo_path =  File.join(CHEF_SPEC_DATA, 'cookbooks')
@@ -33,6 +29,18 @@ describe Chef::Resource do
     @events = Chef::EventDispatch::Dispatcher.new
     @run_context = Chef::RunContext.new(@node, @cookbook_collection, @events)
     @resource = Chef::Resource.new("funk", @run_context)
+  end
+
+  it "should mixin shell_out" do
+    expect(@resource.respond_to?(:shell_out)).to be true
+  end
+
+  it "should mixin shell_out!" do
+    expect(@resource.respond_to?(:shell_out!)).to be true
+  end
+
+  it "should mixin shell_out_with_systems_locale" do
+    expect(@resource.respond_to?(:shell_out_with_systems_locale)).to be true
   end
 
   describe "when inherited" do
@@ -51,8 +59,8 @@ describe Chef::Resource do
   end
 
   describe "when declaring the identity attribute" do
-    it "has no identity attribute by default" do
-      expect(Chef::Resource.identity_attr).to be_nil
+    it "has :name as identity attribute by default" do
+      expect(Chef::Resource.identity_attr).to eq(:name)
     end
 
     it "sets an identity attribute" do
@@ -162,7 +170,7 @@ describe Chef::Resource do
     end
   end
 
-  describe "load_prior_resource" do
+  describe "load_from" do
     before(:each) do
       @prior_resource = Chef::Resource.new("funk")
       @prior_resource.supports(:funky => true)
@@ -174,12 +182,12 @@ describe Chef::Resource do
     end
 
     it "should load the attributes of a prior resource" do
-      @resource.load_prior_resource(@resource.resource_name, @resource.name)
+      @resource.load_from(@prior_resource)
       expect(@resource.supports).to eq({ :funky => true })
     end
 
     it "should not inherit the action from the prior resource" do
-      @resource.load_prior_resource(@resource.resource_name, @resource.name)
+      @resource.load_from(@prior_resource)
       expect(@resource.action).not_to eq(@prior_resource.action)
     end
   end
@@ -194,12 +202,12 @@ describe Chef::Resource do
       expect(@resource.name).to eql("monkey")
     end
 
-    it "should not be valid without a name" do
-      expect { @resource.name false }.to raise_error(ArgumentError)
+    it "coerces arrays to names" do
+      expect(@resource.name ['a', 'b']).to eql('a, b')
     end
 
-    it "should always have a string for name" do
-      expect { @resource.name Hash.new }.to raise_error(ArgumentError)
+    it "should coerce objects to a string" do
+      expect(@resource.name Object.new).to be_a(String)
     end
   end
 
@@ -257,6 +265,12 @@ describe Chef::Resource do
       @resource.notifies_delayed(:restart, :service => "apache")
       expected_notification = Chef::Resource::Notification.new({:service => "apache"}, :restart, @resource)
       expect(@resource.delayed_notifications).to include(expected_notification)
+    end
+
+    it "notifies a resource with an array for its name via its prettified string name" do
+      @run_context.resource_collection << Chef::Resource::ZenMaster.new(["coffee", "tea"])
+      @resource.notifies :reload, @run_context.resource_collection.find(:zen_master => "coffee, tea")
+      expect(@resource.delayed_notifications.detect{|e| e.resource.name == "coffee, tea" && e.action == :reload}).not_to be_nil
     end
   end
 
@@ -318,6 +332,86 @@ describe Chef::Resource do
     end
   end
 
+  describe "self.resource_name" do
+    context "When resource_name is not set" do
+      it "and there are no provides lines, resource_name is nil" do
+        c = Class.new(Chef::Resource) do
+        end
+
+        r = c.new('hi')
+        r.declared_type = :d
+        expect(c.resource_name).to be_nil
+        expect(r.resource_name).to be_nil
+        expect(r.declared_type).to eq :d
+      end
+
+      it "and there are no provides lines, @resource_name is used" do
+        c = Class.new(Chef::Resource) do
+          def initialize(*args, &block)
+            @resource_name = :blah
+            super
+          end
+        end
+
+        r = c.new('hi')
+        r.declared_type = :d
+        expect(c.resource_name).to be_nil
+        expect(r.resource_name).to eq :blah
+        expect(r.declared_type).to eq :d
+      end
+
+      it "and the resource class gets a late-bound name, resource_name is nil" do
+        c = Class.new(Chef::Resource) do
+          def self.name
+            "ResourceSpecNameTest"
+          end
+        end
+
+        r = c.new('hi')
+        r.declared_type = :d
+        expect(c.resource_name).to be_nil
+        expect(r.resource_name).to be_nil
+        expect(r.declared_type).to eq :d
+      end
+    end
+
+    it "resource_name without provides is honored" do
+      c = Class.new(Chef::Resource) do
+        resource_name 'blah'
+      end
+
+      r = c.new('hi')
+      r.declared_type = :d
+      expect(c.resource_name).to eq :blah
+      expect(r.resource_name).to eq :blah
+      expect(r.declared_type).to eq :d
+    end
+    it "setting class.resource_name with 'resource_name = blah' overrides declared_type" do
+      c = Class.new(Chef::Resource) do
+        provides :self_resource_name_test_2
+      end
+      c.resource_name = :blah
+
+      r = c.new('hi')
+      r.declared_type = :d
+      expect(c.resource_name).to eq :blah
+      expect(r.resource_name).to eq :blah
+      expect(r.declared_type).to eq :d
+    end
+    it "setting class.resource_name with 'resource_name blah' overrides declared_type" do
+      c = Class.new(Chef::Resource) do
+        resource_name :blah
+        provides :self_resource_name_test_3
+      end
+
+      r = c.new('hi')
+      r.declared_type = :d
+      expect(c.resource_name).to eq :blah
+      expect(r.resource_name).to eq :blah
+      expect(r.declared_type).to eq :d
+    end
+  end
+
   describe "is" do
     it "should return the arguments passed with 'is'" do
       zm = Chef::Resource::ZenMaster.new("coffee")
@@ -337,7 +431,7 @@ describe Chef::Resource do
       expect(json).to match(/instance_vars/)
     end
 
-    include_examples "to_json equalivent to Chef::JSONCompat.to_json" do
+    include_examples "to_json equivalent to Chef::JSONCompat.to_json" do
       let(:jsonable) { @resource }
     end
   end
@@ -441,8 +535,21 @@ describe Chef::Resource do
       expect(Chef::Resource.provider_base).to eq(Chef::Provider)
     end
 
-    it "allows the base provider to be overriden by a " do
-      expect(ResourceTestHarness.provider_base).to eq(Chef::Provider::Package)
+    it "allows the base provider to be overridden" do
+      Chef::Config.treat_deprecation_warnings_as_errors(false)
+      class OverrideProviderBaseTest < Chef::Resource
+        provider_base Chef::Provider::Package
+      end
+
+      expect(OverrideProviderBaseTest.provider_base).to eq(Chef::Provider::Package)
+    end
+
+    it "warns when setting provider_base" do
+      expect {
+        class OverrideProviderBaseTest2 < Chef::Resource
+          provider_base Chef::Provider::Package
+        end
+      }.to raise_error(Chef::Exceptions::DeprecatedFeatureError)
     end
 
   end
@@ -703,21 +810,21 @@ describe Chef::Resource do
     end
 
     it 'adds mappings for a single platform' do
-      expect(Chef::Resource.node_map).to receive(:set).with(
+      expect(Chef.resource_handler_map).to receive(:set).with(
         :dinobot, Chef::Resource::Klz, { platform: ['autobots'] }
       )
       klz.provides :dinobot, platform: ['autobots']
     end
 
     it 'adds mappings for multiple platforms' do
-      expect(Chef::Resource.node_map).to receive(:set).with(
+      expect(Chef.resource_handler_map).to receive(:set).with(
         :energy, Chef::Resource::Klz, { platform: ['autobots', 'decepticons']}
       )
       klz.provides :energy, platform: ['autobots', 'decepticons']
     end
 
     it 'adds mappings for all platforms' do
-      expect(Chef::Resource.node_map).to receive(:set).with(
+      expect(Chef.resource_handler_map).to receive(:set).with(
         :tape_deck, Chef::Resource::Klz, {}
       )
       klz.provides :tape_deck
@@ -725,35 +832,51 @@ describe Chef::Resource do
 
   end
 
-  describe "lookups from the platform map" do
-    let(:klz1) { Class.new(Chef::Resource) }
-    let(:klz2) { Class.new(Chef::Resource) }
+  describe "resource_for_node" do
+    describe "lookups from the platform map" do
+      let(:klz1) { Class.new(Chef::Resource) }
 
-    before(:each) do
-      Chef::Resource::Klz1 = klz1
-      Chef::Resource::Klz2 = klz2
-      @node = Chef::Node.new
-      @node.name("bumblebee")
-      @node.automatic[:platform] = "autobots"
-      @node.automatic[:platform_version] = "6.1"
-      Object.const_set('Soundwave', klz1)
-      klz2.provides :dinobot, :on_platforms => ['autobots']
-      Object.const_set('Grimlock', klz2)
-    end
-
-    after(:each) do
-      Object.send(:remove_const, :Soundwave)
-      Object.send(:remove_const, :Grimlock)
-      Chef::Resource.send(:remove_const, :Klz1)
-      Chef::Resource.send(:remove_const, :Klz2)
-    end
-
-    describe "resource_for_node" do
-      it "returns a resource by short_name and node" do
-        expect(Chef::Resource.resource_for_node(:dinobot, @node)).to eql(Grimlock)
+      before(:each) do
+        Chef::Resource::Klz1 = klz1
+        @node = Chef::Node.new
+        @node.name("bumblebee")
+        @node.automatic[:platform] = "autobots"
+        @node.automatic[:platform_version] = "6.1"
+        Object.const_set('Soundwave', klz1)
+        klz1.provides :soundwave
       end
+
+      after(:each) do
+        Object.send(:remove_const, :Soundwave)
+        Chef::Resource.send(:remove_const, :Klz1)
+      end
+
       it "returns a resource by short_name if nothing else matches" do
-        expect(Chef::Resource.resource_for_node(:soundwave, @node)).to eql(Soundwave)
+        expect(Chef::Resource.resource_for_node(:soundwave, @node)).to eql(klz1)
+      end
+    end
+
+    describe "lookups from the platform map" do
+      let(:klz2) { Class.new(Chef::Resource) }
+
+      before(:each) do
+        Chef::Resource::Klz2 = klz2
+        @node = Chef::Node.new
+        @node.name("bumblebee")
+        @node.automatic[:platform] = "autobots"
+        @node.automatic[:platform_version] = "6.1"
+        klz2.provides :dinobot, :platform => ['autobots']
+        Object.const_set('Grimlock', klz2)
+        klz2.provides :grimlock
+      end
+
+      after(:each) do
+        Object.send(:remove_const, :Grimlock)
+        Chef::Resource.send(:remove_const, :Klz2)
+      end
+
+      it "returns a resource by short_name and node" do
+        expect(Chef::Resource.resource_for_node(:dinobot, @node)).to eql(klz2)
       end
     end
 
@@ -854,155 +977,90 @@ describe Chef::Resource do
     end
 
   end
-end
 
-describe Chef::Resource::Notification do
-  before do
-    @notification = Chef::Resource::Notification.new(:service_apache, :restart, :template_httpd_conf)
+  describe "#action" do
+    let(:resource_class) do
+      Class.new(described_class) do
+        allowed_actions(%i{one two})
+      end
+    end
+    let(:resource) { resource_class.new('test', nil) }
+    subject { resource.action }
+
+    context "with a no action" do
+      it { is_expected.to eq [:nothing] }
+    end
+
+    context "with a default action" do
+      let(:resource_class) do
+        Class.new(described_class) do
+          default_action(:one)
+        end
+      end
+      it { is_expected.to eq [:one] }
+    end
+
+    context "with a symbol action" do
+      before { resource.action(:one) }
+      it { is_expected.to eq [:one] }
+    end
+
+    context "with a string action" do
+      before { resource.action('two') }
+      it { is_expected.to eq [:two] }
+    end
+
+    context "with an array action" do
+      before { resource.action([:two, :one]) }
+      it { is_expected.to eq [:two, :one] }
+    end
+
+    context "with an assignment" do
+      before { resource.action = :one }
+      it { is_expected.to eq [:one] }
+    end
+
+    context "with an array assignment" do
+      before { resource.action = [:two, :one] }
+      it { is_expected.to eq [:two, :one] }
+    end
+
+    context "with an invalid action" do
+      it { expect { resource.action(:three) }.to raise_error Chef::Exceptions::ValidationFailed }
+    end
+
+    context "with an invalid assignment action" do
+      it { expect { resource.action = :three }.to raise_error Chef::Exceptions::ValidationFailed }
+    end
   end
 
-  it "has a resource to be notified" do
-    expect(@notification.resource).to eq(:service_apache)
+  describe ".default_action" do
+    let(:default_action) { }
+    let(:resource_class) do
+      actions = default_action
+      Class.new(described_class) do
+        default_action(actions) if actions
+      end
+    end
+    subject { resource_class.default_action }
+
+    context "with no default actions" do
+      it { is_expected.to eq [:nothing] }
+    end
+
+    context "with a symbol default action" do
+      let(:default_action) { :one }
+      it { is_expected.to eq [:one] }
+    end
+
+    context "with a string default action" do
+      let(:default_action) { 'one' }
+      it { is_expected.to eq [:one] }
+    end
+
+    context "with an array default action" do
+      let(:default_action) { [:two, :one] }
+      it { is_expected.to eq [:two, :one] }
+    end
   end
-
-  it "has an action to take on the service" do
-    expect(@notification.action).to eq(:restart)
-  end
-
-  it "has a notifying resource" do
-    expect(@notification.notifying_resource).to eq(:template_httpd_conf)
-  end
-
-  it "is a duplicate of another notification with the same target resource and action" do
-    other = Chef::Resource::Notification.new(:service_apache, :restart, :sync_web_app_code)
-    expect(@notification.duplicates?(other)).to be_truthy
-  end
-
-  it "is not a duplicate of another notification if the actions differ" do
-    other = Chef::Resource::Notification.new(:service_apache, :enable, :install_apache)
-    expect(@notification.duplicates?(other)).to be_falsey
-  end
-
-  it "is not a duplicate of another notification if the target resources differ" do
-    other = Chef::Resource::Notification.new(:service_sshd, :restart, :template_httpd_conf)
-    expect(@notification.duplicates?(other)).to be_falsey
-  end
-
-  it "raises an ArgumentError if you try to check a non-ducktype object for duplication" do
-    expect {@notification.duplicates?(:not_a_notification)}.to raise_error(ArgumentError)
-  end
-
-  it "takes no action to resolve a resource reference that doesn't need to be resolved" do
-    @keyboard_cat = Chef::Resource::Cat.new("keyboard_cat")
-    @notification.resource = @keyboard_cat
-    @long_cat = Chef::Resource::Cat.new("long_cat")
-    @notification.notifying_resource = @long_cat
-    @resource_collection = Chef::ResourceCollection.new
-    # would raise an error since the resource is not in the collection
-    @notification.resolve_resource_reference(@resource_collection)
-    expect(@notification.resource).to eq(@keyboard_cat)
-  end
-
-  it "resolves a lazy reference to a resource" do
-    @notification.resource = {:cat => "keyboard_cat"}
-    @keyboard_cat = Chef::Resource::Cat.new("keyboard_cat")
-    @resource_collection = Chef::ResourceCollection.new
-    @resource_collection << @keyboard_cat
-    @long_cat = Chef::Resource::Cat.new("long_cat")
-    @notification.notifying_resource = @long_cat
-    @notification.resolve_resource_reference(@resource_collection)
-    expect(@notification.resource).to eq(@keyboard_cat)
-  end
-
-  it "resolves a lazy reference to its notifying resource" do
-    @keyboard_cat = Chef::Resource::Cat.new("keyboard_cat")
-    @notification.resource = @keyboard_cat
-    @notification.notifying_resource = {:cat => "long_cat"}
-    @long_cat = Chef::Resource::Cat.new("long_cat")
-    @resource_collection = Chef::ResourceCollection.new
-    @resource_collection << @long_cat
-    @notification.resolve_resource_reference(@resource_collection)
-    expect(@notification.notifying_resource).to eq(@long_cat)
-  end
-
-  it "resolves lazy references to both its resource and its notifying resource" do
-    @notification.resource = {:cat => "keyboard_cat"}
-    @keyboard_cat = Chef::Resource::Cat.new("keyboard_cat")
-    @resource_collection = Chef::ResourceCollection.new
-    @resource_collection << @keyboard_cat
-    @notification.notifying_resource = {:cat => "long_cat"}
-    @long_cat = Chef::Resource::Cat.new("long_cat")
-    @resource_collection << @long_cat
-    @notification.resolve_resource_reference(@resource_collection)
-    expect(@notification.resource).to eq(@keyboard_cat)
-    expect(@notification.notifying_resource).to eq(@long_cat)
-  end
-
-  it "raises a RuntimeError if you try to reference multiple resources" do
-    @notification.resource = {:cat => ["keyboard_cat", "cheez_cat"]}
-    @keyboard_cat = Chef::Resource::Cat.new("keyboard_cat")
-    @cheez_cat = Chef::Resource::Cat.new("cheez_cat")
-    @resource_collection = Chef::ResourceCollection.new
-    @resource_collection << @keyboard_cat
-    @resource_collection << @cheez_cat
-    @long_cat = Chef::Resource::Cat.new("long_cat")
-    @notification.notifying_resource = @long_cat
-    expect {@notification.resolve_resource_reference(@resource_collection)}.to raise_error(RuntimeError)
-  end
-
-  it "raises a RuntimeError if you try to reference multiple notifying resources" do
-    @notification.notifying_resource = {:cat => ["long_cat", "cheez_cat"]}
-    @long_cat = Chef::Resource::Cat.new("long_cat")
-    @cheez_cat = Chef::Resource::Cat.new("cheez_cat")
-    @resource_collection = Chef::ResourceCollection.new
-    @resource_collection << @long_cat
-    @resource_collection << @cheez_cat
-    @keyboard_cat = Chef::Resource::Cat.new("keyboard_cat")
-    @notification.resource = @keyboard_cat
-    expect {@notification.resolve_resource_reference(@resource_collection)}.to raise_error(RuntimeError)
-  end
-
-  it "raises a RuntimeError if it can't find a resource in the resource collection when resolving a lazy reference" do
-    @notification.resource = {:cat => "keyboard_cat"}
-    @cheez_cat = Chef::Resource::Cat.new("cheez_cat")
-    @resource_collection = Chef::ResourceCollection.new
-    @resource_collection << @cheez_cat
-    @long_cat = Chef::Resource::Cat.new("long_cat")
-    @notification.notifying_resource = @long_cat
-    expect {@notification.resolve_resource_reference(@resource_collection)}.to raise_error(RuntimeError)
-  end
-
-  it "raises a RuntimeError if it can't find a notifying resource in the resource collection when resolving a lazy reference" do
-    @notification.notifying_resource = {:cat => "long_cat"}
-    @cheez_cat = Chef::Resource::Cat.new("cheez_cat")
-    @resource_collection = Chef::ResourceCollection.new
-    @resource_collection << @cheez_cat
-    @keyboard_cat = Chef::Resource::Cat.new("keyboard_cat")
-    @notification.resource = @keyboard_cat
-    expect {@notification.resolve_resource_reference(@resource_collection)}.to raise_error(RuntimeError)
-  end
-
-  it "raises an ArgumentError if improper syntax is used in the lazy reference to its resource" do
-    @notification.resource = "cat => keyboard_cat"
-    @keyboard_cat = Chef::Resource::Cat.new("keyboard_cat")
-    @resource_collection = Chef::ResourceCollection.new
-    @resource_collection << @keyboard_cat
-    @long_cat = Chef::Resource::Cat.new("long_cat")
-    @notification.notifying_resource = @long_cat
-    expect {@notification.resolve_resource_reference(@resource_collection)}.to raise_error(ArgumentError)
-  end
-
-  it "raises an ArgumentError if improper syntax is used in the lazy reference to its notifying resource" do
-    @notification.notifying_resource = "cat => long_cat"
-    @long_cat = Chef::Resource::Cat.new("long_cat")
-    @resource_collection = Chef::ResourceCollection.new
-    @resource_collection << @long_cat
-    @keyboard_cat = Chef::Resource::Cat.new("keyboard_cat")
-    @notification.resource = @keyboard_cat
-    expect {@notification.resolve_resource_reference(@resource_collection)}.to raise_error(ArgumentError)
-  end
-
-  # Create test to resolve lazy references to both notifying resource and dest. resource
-  # Create tests to check proper error raising
-
 end

@@ -20,6 +20,7 @@
 #
 
 require 'spec_helper'
+require 'chef/platform/resource_priority_map'
 
 describe Chef::Recipe do
 
@@ -82,7 +83,7 @@ describe Chef::Recipe do
       it "should require a name argument" do
         expect {
           recipe.cat
-        }.to raise_error(ArgumentError, "You must supply a name when declaring a cat resource")
+        }.to raise_error(ArgumentError)
       end
 
       it "should allow regular errors (not NameErrors) to pass unchanged" do
@@ -120,7 +121,8 @@ describe Chef::Recipe do
 
         it "locate resource for particular platform" do
           ShaunTheSheep = Class.new(Chef::Resource)
-          ShaunTheSheep.provides :laughter, :on_platforms => ["television"]
+          ShaunTheSheep.resource_name :shaun_the_sheep
+          ShaunTheSheep.provides :laughter, :platform => ["television"]
           node.automatic[:platform] = "television"
           node.automatic[:platform_version] = "123"
           res = recipe.laughter "timmy"
@@ -130,10 +132,44 @@ describe Chef::Recipe do
 
         it "locate a resource for all platforms" do
           YourMom = Class.new(Chef::Resource)
+          YourMom.resource_name :your_mom
           YourMom.provides :love_and_caring
           res = recipe.love_and_caring "mommy"
           expect(res.name).to eql("mommy")
           res.kind_of?(YourMom)
+        end
+
+        describe "when there is more than one resource that resolves on a node" do
+          before do
+            node.automatic[:platform] = "nbc_sports"
+            Sounders = Class.new(Chef::Resource)
+            Sounders.resource_name :sounders
+            TottenhamHotspur = Class.new(Chef::Resource)
+            TottenhamHotspur.resource_name :tottenham_hotspur
+          end
+
+          after do
+            Object.send(:remove_const, :Sounders)
+            Object.send(:remove_const, :TottenhamHotspur)
+          end
+
+          it "selects the first one alphabetically" do
+            Sounders.provides :football, platform: "nbc_sports"
+            TottenhamHotspur.provides :football, platform: "nbc_sports"
+
+            res1 = recipe.football "club world cup"
+            expect(res1.name).to eql("club world cup")
+            expect(res1).to be_a_kind_of(Sounders)
+          end
+
+          it "selects the first one alphabetically even if the declaration order is reversed" do
+            TottenhamHotspur.provides :football2, platform: "nbc_sports"
+            Sounders.provides :football2, platform: "nbc_sports"
+
+            res1 = recipe.football2 "club world cup"
+            expect(res1.name).to eql("club world cup")
+            expect(res1).to be_a_kind_of(Sounders)
+          end
         end
 
       end
@@ -154,14 +190,99 @@ describe Chef::Recipe do
         expect(zm_resource.recipe_name).to eq("test")
         expect(zm_resource.cookbook_name).to eq("hjk")
         expect(zm_resource.source_line).to include(__FILE__)
+        expect(zm_resource.declared_type).to eq(:zen_master)
       end
 
       it "does not add the resource to the resource collection" do
         zm_resource # force let binding evaluation
         expect { run_context.resource_collection.resources(:zen_master => "klopp") }.to raise_error(Chef::Exceptions::ResourceNotFound)
       end
+    end
+
+    describe "when cloning resources" do
+      def expect_warning
+        expect(Chef::Log).to receive(:warn).with(/3694/)
+        expect(Chef::Log).to receive(:warn).with(/Previous/)
+        expect(Chef::Log).to receive(:warn).with(/Current/)
+      end
+
+      it "should emit a 3694 warning when attributes change" do
+        recipe.zen_master "klopp" do
+          something "bvb"
+        end
+        expect_warning
+        recipe.zen_master "klopp" do
+          something "vbv"
+        end
+      end
+
+      it "should emit a 3694 warning when attributes change" do
+        recipe.zen_master "klopp" do
+          something "bvb"
+        end
+        expect_warning
+        recipe.zen_master "klopp" do
+          something "bvb"
+          peace true
+        end
+      end
+
+      it "should emit a 3694 warning when attributes change" do
+        recipe.zen_master "klopp" do
+          something "bvb"
+          peace true
+        end
+        expect_warning
+        recipe.zen_master "klopp" do
+          something "bvb"
+        end
+      end
+
+      it "should emit a 3694 warning for non-trivial attributes (unfortunately)" do
+        recipe.zen_master "klopp" do
+          something "bvb"
+        end
+        expect_warning
+        recipe.zen_master "klopp" do
+          something "bvb"
+        end
+      end
+
+      it "should not emit a 3694 warning for completely trivial resource cloning" do
+        recipe.zen_master "klopp"
+        expect(Chef::Log).to_not receive(:warn)
+        recipe.zen_master "klopp"
+      end
+
+      it "should not emit a 3694 warning when attributes do not change and the first action is :nothing" do
+        recipe.zen_master "klopp" do
+          action :nothing
+        end
+        expect(Chef::Log).to_not receive(:warn)
+        recipe.zen_master "klopp" do
+          action :score
+        end
+      end
+
+      it "should not emit a 3694 warning when attributes do not change and the second action is :nothing" do
+        recipe.zen_master "klopp" do
+          action :score
+        end
+        expect(Chef::Log).to_not receive(:warn)
+        recipe.zen_master "klopp" do
+          action :nothing
+        end
+      end
+
+      it "validating resources via build_resource" do
+        expect {recipe.build_resource(:remote_file, "klopp") do
+          source Chef::DelayedEvaluator.new {"http://chef.io"}
+        end}.to_not raise_error
+      end
 
     end
+
+
 
     describe "creating resources via declare_resource" do
       let(:zm_resource) do
@@ -285,7 +406,7 @@ describe Chef::Recipe do
 
       it "does not copy the action from the first resource" do
         expect(original_resource.action).to eq([:score])
-        expect(duplicated_resource.action).to eq(:nothing)
+        expect(duplicated_resource.action).to eq([:nothing])
       end
 
       it "does not copy the source location of the first resource" do
@@ -425,6 +546,64 @@ describe Chef::Recipe do
       expect(cookbook_collection[:openldap]).not_to receive(:load_recipe).with("default", run_context)
       recipe.include_recipe "openldap"
     end
+
+    it "will load a recipe out of the current cookbook when include_recipe is called with a leading ::" do
+      openldap_recipe = Chef::Recipe.new("openldap", "test", run_context)
+      expect(node).to receive(:loaded_recipe).with(:openldap, "default").exactly(:once)
+      allow(run_context).to receive(:unreachable_cookbook?).with(:openldap).and_return(false)
+      expect(cookbook_collection[:openldap]).to receive(:load_recipe).with("default", run_context)
+      openldap_recipe.include_recipe "::default"
+    end
+
+    it "will not include the same recipe twice when using leading :: syntax" do
+      openldap_recipe = Chef::Recipe.new("openldap", "test", run_context)
+      expect(node).to receive(:loaded_recipe).with(:openldap, "default").exactly(:once)
+      allow(run_context).to receive(:unreachable_cookbook?).with(:openldap).and_return(false)
+      expect(cookbook_collection[:openldap]).to receive(:load_recipe).with("default", run_context)
+      openldap_recipe.include_recipe "::default"
+      expect(cookbook_collection[:openldap]).not_to receive(:load_recipe).with("default", run_context)
+      openldap_recipe.include_recipe "openldap::default"
+    end
+
+    it "will not include the same recipe twice when using leading :: syntax (reversed order)" do
+      openldap_recipe = Chef::Recipe.new("openldap", "test", run_context)
+      expect(node).to receive(:loaded_recipe).with(:openldap, "default").exactly(:once)
+      allow(run_context).to receive(:unreachable_cookbook?).with(:openldap).and_return(false)
+      expect(cookbook_collection[:openldap]).to receive(:load_recipe).with("default", run_context)
+      openldap_recipe.include_recipe "openldap::default"
+      expect(cookbook_collection[:openldap]).not_to receive(:load_recipe).with("default", run_context)
+      openldap_recipe.include_recipe "::default"
+    end
+
+    it "will not load a recipe twice when called first from an LWRP provider" do
+      openldap_recipe = Chef::Recipe.new("openldap", "test", run_context)
+      expect(node).to receive(:loaded_recipe).with(:openldap, "default").exactly(:once)
+      allow(run_context).to receive(:unreachable_cookbook?).with(:openldap).and_return(false)
+      expect(cookbook_collection[:openldap]).to receive(:load_recipe).with("default", run_context)
+      openldap_recipe.include_recipe "::default"
+      expect(cookbook_collection[:openldap]).not_to receive(:load_recipe).with("default", run_context)
+      openldap_recipe.openldap_includer("do it").run_action(:run)
+    end
+
+    it "will not load a recipe twice when called last from an LWRP provider" do
+      openldap_recipe = Chef::Recipe.new("openldap", "test", run_context)
+      expect(node).to receive(:loaded_recipe).with(:openldap, "default").exactly(:once)
+      allow(run_context).to receive(:unreachable_cookbook?).with(:openldap).and_return(false)
+      expect(cookbook_collection[:openldap]).to receive(:load_recipe).with("default", run_context)
+      openldap_recipe.openldap_includer("do it").run_action(:run)
+      expect(cookbook_collection[:openldap]).not_to receive(:load_recipe).with("default", run_context)
+      openldap_recipe.include_recipe "::default"
+    end
+
+    it "will not load a recipe twice when called both times from an LWRP provider" do
+      openldap_recipe = Chef::Recipe.new("openldap", "test", run_context)
+      expect(node).to receive(:loaded_recipe).with(:openldap, "default").exactly(:once)
+      allow(run_context).to receive(:unreachable_cookbook?).with(:openldap).and_return(false)
+      expect(cookbook_collection[:openldap]).to receive(:load_recipe).with("default", run_context)
+      openldap_recipe.openldap_includer("do it").run_action(:run)
+      expect(cookbook_collection[:openldap]).not_to receive(:load_recipe).with("default", run_context)
+      openldap_recipe.openldap_includer("do it").run_action(:run)
+    end
   end
 
   describe "tags" do
@@ -481,6 +660,17 @@ describe Chef::Recipe do
       recipe.tag "foo", "bar"
       recipe.untag "bar", "foo"
       expect(node[:tags]).to eql([])
+    end
+  end
+
+  describe "included DSL" do
+    it "should include features from Chef::DSL::Audit" do
+      expect(recipe.singleton_class.included_modules).to include(Chef::DSL::Audit)
+      expect(recipe.respond_to?(:control_group)).to be true
+    end
+
+    it "should respond to :ps_credential from Chef::DSL::Powershell" do
+      expect(recipe.respond_to?(:ps_credential)).to be true
     end
   end
 end

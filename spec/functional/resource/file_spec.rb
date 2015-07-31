@@ -64,7 +64,7 @@ describe Chef::Resource::File do
     provider.current_resource
   end
 
-  let(:default_mode) { ((0100666 - File.umask) & 07777).to_s(8) }
+  let(:default_mode) { (0666 & ~File.umask).to_s(8) }
 
   it_behaves_like "a file resource"
 
@@ -84,6 +84,31 @@ describe Chef::Resource::File do
         expect(resource_without_content).to be_updated_by_last_action
       end
     end
+  end
+
+
+  describe "when using backup" do
+    before do
+      Chef::Config[:file_backup_path] = CHEF_SPEC_BACKUP_PATH
+      resource_without_content.backup(1)
+      resource_without_content.run_action(:create)
+    end
+
+    let(:backup_glob) { File.join(CHEF_SPEC_BACKUP_PATH, test_file_dir.sub(/^([A-Za-z]:)/, ""), "#{file_base}*") }
+
+    let(:path) do
+      # Use native system path
+      ChefConfig::PathHelper.canonical_path(File.join(test_file_dir, make_tmpname(file_base)), false)
+    end
+
+    it "only stores the number of requested backups" do
+      resource_without_content.content('foo')
+      resource_without_content.run_action(:create)
+      resource_without_content.content('bar')
+      resource_without_content.run_action(:create)
+      expect(Dir.glob(backup_glob).length).to eq(1)
+    end
+
   end
 
   # github issue 1842.

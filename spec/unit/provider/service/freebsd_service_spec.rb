@@ -189,18 +189,6 @@ PS_SAMPLE
         expect(provider.status_load_success).to be_nil
       end
 
-      context "when ps command is nil" do
-        before do
-          node.automatic_attrs[:command] = {:ps => nil}
-        end
-
-        it "should set running to nil" do
-          pending "superclass raises no conversion of nil to string which seems broken"
-          provider.determine_current_status!
-          expect(current_resource.running).to be_nil
-        end
-      end
-
       context "when ps is empty string" do
         before do
           node.automatic_attrs[:command] = {:ps => ""}
@@ -580,6 +568,13 @@ EOF
       expect(provider).not_to receive(:write_rc_conf)
       provider.enable_service
     end
+
+    it "should remove commented out versions of it being enabled" do
+      allow(current_resource).to receive(:enabled).and_return(false)
+      expect(provider).to receive(:read_rc_conf).and_return([ "foo", "bar", "\# #{new_resource.service_name}_enable=\"YES\"", "\# #{new_resource.service_name}_enable=\"NO\""])
+      expect(provider).to receive(:write_rc_conf).with(["foo", "bar", "#{new_resource.service_name}_enable=\"YES\""])
+      provider.enable_service()
+    end
   end
 
   describe Chef::Provider::Service::Freebsd, "disable_service" do
@@ -605,6 +600,13 @@ EOF
     it "should not disable the service if it is already disabled" do
       allow(current_resource).to receive(:enabled).and_return(false)
       expect(provider).not_to receive(:write_rc_conf)
+      provider.disable_service()
+    end
+
+    it "should remove commented out versions of it being disabled or enabled" do
+      allow(current_resource).to receive(:enabled).and_return(true)
+      expect(provider).to receive(:read_rc_conf).and_return([ "foo", "bar", "\# #{new_resource.service_name}_enable=\"YES\"", "\# #{new_resource.service_name}_enable=\"NO\""])
+      expect(provider).to receive(:write_rc_conf).with(["foo", "bar", "#{new_resource.service_name}_enable=\"NO\""])
       provider.disable_service()
     end
   end

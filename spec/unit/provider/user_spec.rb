@@ -91,7 +91,7 @@ describe Chef::Provider::User do
       expect(@current_resource.username).to eq(@new_resource.username)
     end
 
-    it "should change the encoding of gecos to the encoding of the new resource", :ruby_gte_19_only do
+    it "should change the encoding of gecos to the encoding of the new resource" do
       @pw_user.gecos.force_encoding('ASCII-8BIT')
       @provider.load_current_resource
       expect(@provider.current_resource.comment.encoding).to eq(@new_resource.comment.encoding)
@@ -143,8 +143,8 @@ describe Chef::Provider::User do
         begin
           require 'rubygems'
           require 'shadow'
-        rescue LoadError => e
-          pending "ruby-shadow gem not installed for dynamic load test"
+        rescue LoadError
+          skip "ruby-shadow gem not installed for dynamic load test"
           true
         else
           false
@@ -161,7 +161,7 @@ describe Chef::Provider::User do
 
       unless shadow_lib_unavail?
         context "and we have the ruby-shadow gem" do
-          pending "and we are not root (rerun this again as root)", :requires_unprivileged_user => true
+          skip "and we are not root (rerun this again as root)", :requires_unprivileged_user => true
 
           context "and we are root", :requires_root => true do
             it "should pass assertions when ruby-shadow can be loaded" do

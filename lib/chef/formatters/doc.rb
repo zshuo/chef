@@ -3,12 +3,14 @@ require 'chef/config'
 
 class Chef
   module Formatters
-    #--
-    # TODO: not sold on the name, but the output is similar to what rspec calls
-    # "specdoc"
+
+    # Formatter similar to RSpec's documentation formatter. Uses indentation to
+    # show context.
     class Doc < Formatters::Base
 
-      attr_reader :start_time, :end_time
+      attr_reader :start_time, :end_time, :successful_audits, :failed_audits
+      private :successful_audits, :failed_audits
+
       cli_name(:doc)
 
       def initialize(out, err)
@@ -16,8 +18,11 @@ class Chef
 
         @updated_resources = 0
         @up_to_date_resources = 0
+        @successful_audits = 0
+        @failed_audits = 0
         @start_time = Time.now
         @end_time = @start_time
+        @skipped_resources = 0
       end
 
       def elapsed_time
@@ -29,7 +34,11 @@ class Chef
       end
 
       def total_resources
-        @up_to_date_resources + @updated_resources
+        @up_to_date_resources + @updated_resources + @skipped_resources
+      end
+
+      def total_audits
+        successful_audits + failed_audits
       end
 
       def run_completed(node)
@@ -38,6 +47,9 @@ class Chef
           puts_line "Chef Client finished, #{@updated_resources}/#{total_resources} resources would have been updated"
         else
           puts_line "Chef Client finished, #{@updated_resources}/#{total_resources} resources updated in #{elapsed_time} seconds"
+          if total_audits > 0
+            puts_line "  #{successful_audits}/#{total_audits} controls succeeded"
+          end
         end
       end
 
@@ -47,6 +59,9 @@ class Chef
           puts_line "Chef Client failed. #{@updated_resources} resources would have been updated"
         else
           puts_line "Chef Client failed. #{@updated_resources} resources updated in #{elapsed_time} seconds"
+          if total_audits > 0
+            puts_line "  #{successful_audits} controls succeeded"
+          end
         end
       end
 
@@ -77,6 +92,10 @@ class Chef
       # Default and override attrs from roles have been computed, but not yet applied.
       # Normal attrs from JSON have been added to the node.
       def node_load_completed(node, expanded_run_list, config)
+      end
+
+      def policyfile_loaded(policy)
+        puts_line "Using policy '#{policy["name"]}' at revision '#{policy["revision_id"]}'"
       end
 
       # Called before the cookbook collection is fetched from the server.
@@ -151,6 +170,42 @@ class Chef
         unindent if @current_recipe
       end
 
+      def converge_failed(e)
+        # Currently a failed converge is handled the same way as a successful converge
+        converge_complete
+      end
+
+      # Called before audit phase starts
+      def audit_phase_start(run_status)
+        puts_line "Starting audit phase"
+      end
+
+      def audit_phase_complete(audit_output)
+        puts_line audit_output
+        puts_line "Auditing complete"
+      end
+
+      def audit_phase_failed(error, audit_output)
+        puts_line audit_output
+        puts_line ""
+        puts_line "Audit phase exception:"
+        indent
+        puts_line "#{error.message}"
+        if error.backtrace
+          error.backtrace.each do |l|
+            puts_line l
+          end
+        end
+      end
+
+      def control_example_success(control_group_name, example_data)
+        @successful_audits += 1
+      end
+
+      def control_example_failure(control_group_name, example_data, error)
+        @failed_audits += 1
+      end
+
       # Called before action is executed on a resource.
       def resource_action_start(resource, action, notification_type=nil, notifier=nil)
         if resource.cookbook_name && resource.recipe_name
@@ -182,6 +237,7 @@ class Chef
 
       # Called when a resource action has been skipped b/c of a conditional
       def resource_skipped(resource, action, conditional)
+        @skipped_resources += 1
         # TODO: more info about conditional
         puts " (skipped due to #{conditional.short_description})", :stream => resource
         unindent

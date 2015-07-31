@@ -255,7 +255,7 @@ shared_examples_for Chef::Provider::File do
     context "examining file security metadata on Unix with a file that exists" do
       before do
         # fake that we're on unix even if we're on windows
-        allow(Chef::Platform).to receive(:windows?).and_return(false)
+        allow(ChefConfig).to receive(:windows?).and_return(false)
         # mock up the filesystem to behave like unix
         setup_normal_file
         stat_struct = double("::File.stat", :mode => 0600, :uid => 0, :gid => 0, :mtime => 10000)
@@ -331,7 +331,7 @@ shared_examples_for Chef::Provider::File do
     context "examining file security metadata on Unix with a file that does not exist" do
       before do
         # fake that we're on unix even if we're on windows
-        allow(Chef::Platform).to receive(:windows?).and_return(false)
+        allow(ChefConfig).to receive(:windows?).and_return(false)
         setup_missing_file
       end
 
@@ -380,7 +380,7 @@ shared_examples_for Chef::Provider::File do
 
     before do
       # fake that we're on unix even if we're on windows
-      allow(Chef::Platform).to receive(:windows?).and_return(false)
+      allow(ChefConfig).to receive(:windows?).and_return(false)
       # mock up the filesystem to behave like unix
       setup_normal_file
       stat_struct = double("::File.stat", :mode => 0600, :uid => 0, :gid => 0, :mtime => 10000)
@@ -456,6 +456,36 @@ shared_examples_for Chef::Provider::File do
       provider.run_action(:create)
     end
 
+    context "do_validate_content" do
+      before { setup_normal_file }
+
+      let(:tempfile) {
+        t = double('Tempfile', :path => "/tmp/foo-bar-baz", :closed? => true)
+        allow(content).to receive(:tempfile).and_return(t)
+        t
+      }
+
+      let(:verification) { double("Verification") }
+
+      context "with user-supplied verifications" do
+        it "calls #verify on each verification with tempfile path" do
+          allow(Chef::Resource::File::Verification).to receive(:new).and_return(verification)
+          provider.new_resource.verify "true"
+          provider.new_resource.verify "true"
+          expect(verification).to receive(:verify).with(tempfile.path).twice.and_return(true)
+          provider.send(:do_validate_content)
+        end
+
+        it "raises an exception if any verification fails" do
+          provider.new_resource.verify "true"
+          provider.new_resource.verify "false"
+          allow(verification).to receive(:verify).with("true").and_return(true)
+          allow(verification).to receive(:verify).with("false").and_return(false)
+          expect{provider.send(:do_validate_content)}.to raise_error(Chef::Exceptions::ValidationFailed)
+        end
+      end
+    end
+
     context "do_create_file" do
       context "when the file exists" do
         before { setup_normal_file }
@@ -499,25 +529,48 @@ shared_examples_for Chef::Provider::File do
                                   :for_reporting => diff_for_reporting )
             allow(diff).to receive(:diff).with(resource_path, tempfile_path).and_return(true)
             expect(provider).to receive(:diff).at_least(:once).and_return(diff)
-            expect(provider).to receive(:managing_content?).at_least(:once).and_return(true)
             expect(provider).to receive(:checksum).with(tempfile_path).and_return(tempfile_sha256)
-            expect(provider).to receive(:checksum).with(resource_path).and_return(tempfile_sha256)
+            allow(provider).to receive(:managing_content?).and_return(true)
+            allow(provider).to receive(:checksum).with(resource_path).and_return(tempfile_sha256)
+            expect(resource).not_to receive(:checksum).with(tempfile_sha256)  # do not mutate the new resource
             expect(provider.deployment_strategy).to receive(:deploy).with(tempfile_path, normalized_path)
           end
           context "when the file was created" do
             before { expect(provider).to receive(:needs_creating?).at_least(:once).and_return(true) }
-            it "does not backup the file and does not produce a diff for reporting" do
+            it "does not backup the file" do
               expect(provider).not_to receive(:do_backup)
+              provider.send(:do_contents_changes)
+            end
+
+            it "does not produce a diff for reporting" do
               provider.send(:do_contents_changes)
               expect(resource.diff).to be_nil
             end
+
+            it "renders the final checksum correctly for reporting" do
+              provider.send(:do_contents_changes)
+              expect(resource.state_for_resource_reporter[:checksum]).to eql(tempfile_sha256)
+            end
           end
           context "when the file was not created" do
-            before { expect(provider).to receive(:needs_creating?).at_least(:once).and_return(false) }
-            it "backs up the file and produces a diff for reporting" do
+            before do
+              allow(provider).to receive(:do_backup)  # stub do_backup
+              expect(provider).to receive(:needs_creating?).at_least(:once).and_return(false)
+            end
+
+            it "backs up the file" do
               expect(provider).to receive(:do_backup)
               provider.send(:do_contents_changes)
+            end
+
+            it "produces a diff for reporting" do
+              provider.send(:do_contents_changes)
               expect(resource.diff).to eq(diff_for_reporting)
+            end
+
+            it "renders the final checksum correctly for reporting" do
+              provider.send(:do_contents_changes)
+              expect(resource.state_for_resource_reporter[:checksum]).to eql(tempfile_sha256)
             end
           end
         end

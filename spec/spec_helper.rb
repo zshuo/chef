@@ -54,6 +54,9 @@ Dir['lib/chef/knife/**/*.rb'].
   map {|f| f.gsub(%r[\.rb$], '') }.
   each {|f| require f }
 
+require 'chef/resource_resolver'
+require 'chef/provider_resolver'
+
 require 'chef/mixins'
 require 'chef/dsl'
 require 'chef/application'
@@ -83,8 +86,15 @@ Dir["spec/support/**/*.rb"].
 
 OHAI_SYSTEM = Ohai::System.new
 OHAI_SYSTEM.all_plugins("platform")
-TEST_PLATFORM = OHAI_SYSTEM["platform"].dup.freeze
-TEST_PLATFORM_VERSION = OHAI_SYSTEM["platform_version"].dup.freeze
+
+test_node = Chef::Node.new
+test_node.automatic['os'] = (OHAI_SYSTEM['os'] || 'unknown_os').dup.freeze
+test_node.automatic['platform_family'] = (OHAI_SYSTEM['platform_family'] || 'unknown_platform_family').dup.freeze
+test_node.automatic['platform'] = (OHAI_SYSTEM['platform'] || 'unknown_platform').dup.freeze
+test_node.automatic['platform_version'] = (OHAI_SYSTEM['platform_version'] || 'unknown_platform_version').dup.freeze
+TEST_NODE = test_node.freeze
+TEST_PLATFORM = TEST_NODE['platform']
+TEST_PLATFORM_VERSION = TEST_NODE['platform_version']
 
 RSpec.configure do |config|
   config.include(Matchers)
@@ -105,10 +115,15 @@ RSpec.configure do |config|
   # Tests that randomly fail, but may have value.
   config.filter_run_excluding :volatile => true
   config.filter_run_excluding :volatile_on_solaris => true if solaris?
+  config.filter_run_excluding :volatile_from_verify => false
 
-  # Add jruby filters here
+  config.filter_run_excluding :skip_appveyor => true if ENV["APPVEYOR"]
+  config.filter_run_excluding :appveyor_only => true unless ENV["APPVEYOR"]
+
   config.filter_run_excluding :windows_only => true unless windows?
   config.filter_run_excluding :not_supported_on_mac_osx_106 => true if mac_osx_106?
+  config.filter_run_excluding :not_supported_on_mac_osx=> true if mac_osx?
+  config.filter_run_excluding :mac_osx_only=> true if !mac_osx?
   config.filter_run_excluding :not_supported_on_win2k3 => true if windows_win2k3?
   config.filter_run_excluding :not_supported_on_solaris => true if solaris?
   config.filter_run_excluding :win2k3_only => true unless windows_win2k3?
@@ -118,27 +133,28 @@ RSpec.configure do |config|
   config.filter_run_excluding :windows_powershell_dsc_only => true unless windows_powershell_dsc?
   config.filter_run_excluding :windows_powershell_no_dsc_only => true unless ! windows_powershell_dsc?
   config.filter_run_excluding :windows_domain_joined_only => true unless windows_domain_joined?
+  config.filter_run_excluding :windows_not_domain_joined_only => true if windows_domain_joined?
   config.filter_run_excluding :solaris_only => true unless solaris?
   config.filter_run_excluding :system_windows_service_gem_only => true unless system_windows_service_gem?
   config.filter_run_excluding :unix_only => true unless unix?
   config.filter_run_excluding :aix_only => true unless aix?
   config.filter_run_excluding :supports_cloexec => true unless supports_cloexec?
   config.filter_run_excluding :selinux_only => true unless selinux_enabled?
-  config.filter_run_excluding :ruby_18_only => true unless ruby_18?
-  config.filter_run_excluding :ruby_19_only => true unless ruby_19?
-  config.filter_run_excluding :ruby_gte_19_only => true unless ruby_gte_19?
   config.filter_run_excluding :ruby_20_only => true unless ruby_20?
-  config.filter_run_excluding :ruby_gte_20_only => true unless ruby_gte_20?
+  # chef_gte_XX_only and chef_lt_XX_only pair up correctly with the same XX
+  # number.  please conserve this pattern & resist filling out all the operators
+  config.filter_run_excluding :chef_gte_13_only => true unless chef_gte_13?
+  config.filter_run_excluding :chef_lt_13_only => true unless chef_lt_13?
   config.filter_run_excluding :requires_root => true unless root?
   config.filter_run_excluding :requires_root_or_running_windows => true unless (root? || windows?)
   config.filter_run_excluding :requires_unprivileged_user => true if root?
   config.filter_run_excluding :uses_diff => true unless has_diff?
-  config.filter_run_excluding :ruby_gte_20_and_openssl_gte_101 => true unless (ruby_gte_20? && openssl_gte_101?)
+  config.filter_run_excluding :openssl_gte_101 => true unless openssl_gte_101?
   config.filter_run_excluding :openssl_lt_101 => true unless openssl_lt_101?
-  config.filter_run_excluding :ruby_lt_20 => true unless ruby_lt_20?
   config.filter_run_excluding :aes_256_gcm_only => true unless aes_256_gcm?
+  config.filter_run_excluding :broken => true
 
-  running_platform_arch = `uname -m`.strip
+  running_platform_arch = `uname -m`.strip unless windows?
 
   config.filter_run_excluding :arch => lambda {|target_arch|
     running_platform_arch != target_arch
@@ -149,13 +165,17 @@ RSpec.configure do |config|
   config.filter_run_excluding :provider => lambda {|criteria|
     type, target_provider = criteria.first
 
-    platform = TEST_PLATFORM.dup
-    platform_version = TEST_PLATFORM_VERSION.dup
-
-    begin
-      provider_for_running_platform = Chef::Platform.find_provider(platform, platform_version, type)
-      provider_for_running_platform != target_provider
-    rescue ArgumentError # no provider for platform
+    node = TEST_NODE.dup
+    resource_class = Chef::ResourceResolver.resolve(type, node: node)
+    if resource_class
+      resource = resource_class.new('test', Chef::RunContext.new(node, nil, nil))
+      begin
+        provider = resource.provider_for_action(Array(resource_class.default_action).first)
+        provider.class != target_provider
+      rescue Chef::Exceptions::ProviderNotFound # no provider for platform
+        true
+      end
+    else
       true
     end
   }
@@ -164,6 +184,12 @@ RSpec.configure do |config|
 
   config.before(:each) do
     Chef::Config.reset
+
+    # By default, treat deprecation warnings as errors in tests.
+    Chef::Config.treat_deprecation_warnings_as_errors(true)
+
+    # Set environment variable so the setting persists in child processes
+    ENV['CHEF_TREAT_DEPRECATION_WARNINGS_AS_ERRORS'] = "1"
   end
 
   config.before(:suite) do

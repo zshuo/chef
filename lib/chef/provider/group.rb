@@ -17,12 +17,14 @@
 #
 
 require 'chef/provider'
+require 'chef/mixin/shell_out'
 require 'chef/mixin/command'
 require 'etc'
 
 class Chef
   class Provider
     class Group < Chef::Provider
+      include Chef::Mixin::ShellOut
       include Chef::Mixin::Command
       attr_accessor :group_exists
       attr_accessor :change_desc
@@ -123,13 +125,13 @@ class Chef
       def action_create
         case @group_exists
         when false
-          converge_by("create #{@new_resource}") do
+          converge_by("create #{@new_resource.group_name}") do
             create_group
             Chef::Log.info("#{@new_resource} created")
           end
         else
           if compare_group
-            converge_by(["alter group #{@new_resource}"] + change_desc) do
+            converge_by(["alter group #{@new_resource.group_name}"] + change_desc) do
               manage_group
               Chef::Log.info("#{@new_resource} altered")
             end
@@ -139,7 +141,7 @@ class Chef
 
       def action_remove
         if @group_exists
-          converge_by("remove group #{@new_resource}") do
+          converge_by("remove group #{@new_resource.group_name}") do
             remove_group
             Chef::Log.info("#{@new_resource} removed")
           end
@@ -148,7 +150,7 @@ class Chef
 
       def action_manage
         if @group_exists && compare_group
-          converge_by(["manage group #{@new_resource}"] + change_desc) do
+          converge_by(["manage group #{@new_resource.group_name}"] + change_desc) do
             manage_group
             Chef::Log.info("#{@new_resource} managed")
           end
@@ -157,7 +159,7 @@ class Chef
 
       def action_modify
         if compare_group
-          converge_by(["modify group #{@new_resource}"] + change_desc) do
+          converge_by(["modify group #{@new_resource.group_name}"] + change_desc) do
             manage_group
             Chef::Log.info("#{@new_resource} modified")
           end

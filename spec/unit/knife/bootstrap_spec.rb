@@ -23,7 +23,7 @@ require 'net/ssh'
 
 describe Chef::Knife::Bootstrap do
   before do
-    allow(Chef::Platform).to receive(:windows?) { false }
+    allow(ChefConfig).to receive(:windows?) { false }
   end
   let(:knife) do
     Chef::Log.logger = Logger.new(StringIO.new)
@@ -46,6 +46,13 @@ describe Chef::Knife::Bootstrap do
   it "should use chef-full as default template" do
     expect(knife.bootstrap_template).to be_a_kind_of(String)
     expect(File.basename(knife.bootstrap_template)).to eq("chef-full")
+  end
+
+  context "with --bootstrap-vault-item" do
+    let(:bootstrap_cli_options) { [ "--bootstrap-vault-item", "vault1:item1", "--bootstrap-vault-item", "vault1:item2", "--bootstrap-vault-item", "vault2:item1" ] }
+    it "sets the knife config cli option correctly" do
+      expect(knife.config[:bootstrap_vault_item]).to eq({"vault1"=>["item1", "item2"], "vault2"=>["item1"]})
+    end
   end
 
   context "with :distro and :bootstrap_template cli options" do
@@ -95,7 +102,7 @@ describe Chef::Knife::Bootstrap do
     context "when :bootstrap_template config is set to a template name" do
       let(:bootstrap_template) { "example" }
 
-      let(:builtin_template_path) { File.expand_path(File.join(File.dirname(__FILE__), '../../../lib/chef/knife/bootstrap', "example.erb"))}
+      let(:builtin_template_path) { File.expand_path(File.join(File.dirname(__FILE__), '../../../lib/chef/knife/bootstrap/templates', "example.erb"))}
 
       let(:chef_config_dir_template_path) { "/knife/chef/config/bootstrap/example.erb" }
 
@@ -108,7 +115,7 @@ describe Chef::Knife::Bootstrap do
       end
 
       def configure_env_home
-        ENV['HOME'] = "/env/home"
+        allow(Chef::Util::PathHelper).to receive(:home).with(".chef", "bootstrap", "example.erb").and_yield(env_home_template_path)
       end
 
       def configure_gem_files
@@ -116,13 +123,7 @@ describe Chef::Knife::Bootstrap do
       end
 
       before(:each) do
-        @original_home = ENV['HOME']
-        ENV['HOME'] = nil
         expect(File).to receive(:exists?).with(bootstrap_template).and_return(false)
-      end
-
-      after(:each) do
-        ENV['HOME'] = @original_home
       end
 
       context "when file is available everywhere" do
@@ -154,7 +155,7 @@ describe Chef::Knife::Bootstrap do
         end
       end
 
-      context "when file is available in ENV['HOME']" do
+      context "when file is available in home directory" do
         before do
           configure_chef_config_dir
           configure_env_home
@@ -173,7 +174,25 @@ describe Chef::Knife::Bootstrap do
       context "when file is available in Gem files" do
         before do
           configure_chef_config_dir
+          configure_env_home
           configure_gem_files
+
+          expect(File).to receive(:exists?).with(builtin_template_path).and_return(false)
+          expect(File).to receive(:exists?).with(chef_config_dir_template_path).and_return(false)
+          expect(File).to receive(:exists?).with(env_home_template_path).and_return(false)
+          expect(File).to receive(:exists?).with(gem_files_template_path).and_return(true)
+        end
+
+        it "should load the template from Gem files" do
+          expect(knife.find_template).to eq(gem_files_template_path)
+        end
+      end
+
+      context "when file is available in Gem files and home dir doesn't exist" do
+        before do
+          configure_chef_config_dir
+          configure_gem_files
+          allow(Chef::Util::PathHelper).to receive(:home).with(".chef", "bootstrap", "example.erb").and_return(nil)
 
           expect(File).to receive(:exists?).with(builtin_template_path).and_return(false)
           expect(File).to receive(:exists?).with(chef_config_dir_template_path).and_return(false)
@@ -512,6 +531,7 @@ describe Chef::Knife::Bootstrap do
   describe "when running the bootstrap" do
     let(:knife_ssh) do
       knife.name_args = ["foo.example.com"]
+      knife.config[:chef_node_name] = "foo.example.com"
       knife.config[:ssh_user]      = "rooty"
       knife.config[:identity_file] = "~/.ssh/me.rsa"
       allow(knife).to receive(:render_template).and_return("")
@@ -520,25 +540,97 @@ describe Chef::Knife::Bootstrap do
       knife_ssh
     end
 
-    it "configures the underlying ssh command and then runs it" do
-      expect(knife_ssh).to receive(:run)
-      knife.run
+    context "when running with a configured and present validation key" do
+      before do
+        # this tests runs the old code path where we have a validation key, so we need to pass that check
+        allow(File).to receive(:exist?).with(File.expand_path(Chef::Config[:validation_key])).and_return(true)
+      end
+
+
+      it "configures the underlying ssh command and then runs it" do
+        expect(knife_ssh).to receive(:run)
+        knife.run
+      end
+
+      it "falls back to password based auth when auth fails the first time" do
+        allow(knife).to receive(:puts)
+
+        fallback_knife_ssh = knife_ssh.dup
+        expect(knife_ssh).to receive(:run).and_raise(Net::SSH::AuthenticationFailed.new("no ssh for you"))
+        allow(knife).to receive(:knife_ssh_with_password_auth).and_return(fallback_knife_ssh)
+        expect(fallback_knife_ssh).to receive(:run)
+        knife.run
+      end
+
+      it "raises the exception if config[:ssh_password] is set and an authentication exception is raised" do
+        knife.config[:ssh_password] = "password"
+        expect(knife_ssh).to receive(:run).and_raise(Net::SSH::AuthenticationFailed)
+        expect { knife.run }.to raise_error(Net::SSH::AuthenticationFailed)
+      end
+
+      it "creates the client and adds chef-vault items if vault_list is set" do
+        knife.config[:bootstrap_vault_file] = "/not/our/responsibility/to/check/if/this/exists"
+        expect(knife_ssh).to receive(:run)
+        expect(knife.client_builder).to receive(:run)
+        expect(knife.chef_vault_handler).to receive(:run).with(node_name: knife.config[:chef_node_name])
+        knife.run
+      end
+
+      it "creates the client and adds chef-vault items if vault_items is set" do
+        knife.config[:bootstrap_vault_json] = '{ "vault" => "item" }'
+        expect(knife_ssh).to receive(:run)
+        expect(knife.client_builder).to receive(:run)
+        expect(knife.chef_vault_handler).to receive(:run).with(node_name: knife.config[:chef_node_name])
+        knife.run
+      end
+
+      it "does old-style validation without creating a client key if vault_list+vault_items is not set" do
+        expect(File).to receive(:exist?).with(File.expand_path(Chef::Config[:validation_key])).and_return(true)
+        expect(knife_ssh).to receive(:run)
+        expect(knife.client_builder).not_to receive(:run)
+        expect(knife.chef_vault_handler).not_to receive(:run).with(node_name: knife.config[:chef_node_name])
+        knife.run
+      end
+
+      it "raises an exception if the config[:chef_node_name] is not present" do
+        knife.config[:chef_node_name] = nil
+
+        expect { knife.run }.to raise_error(SystemExit)
+      end
     end
 
-    it "falls back to password based auth when auth fails the first time" do
-      allow(knife).to receive(:puts)
+    context "when the validation key is not present" do
+      before do
+        # this tests runs the old code path where we have a validation key, so we need to pass that check
+        allow(File).to receive(:exist?).with(File.expand_path(Chef::Config[:validation_key])).and_return(false)
+      end
 
-      fallback_knife_ssh = knife_ssh.dup
-      expect(knife_ssh).to receive(:run).and_raise(Net::SSH::AuthenticationFailed.new("no ssh for you"))
-      allow(knife).to receive(:knife_ssh_with_password_auth).and_return(fallback_knife_ssh)
-      expect(fallback_knife_ssh).to receive(:run)
-      knife.run
+      it "creates the client (and possibly adds chef-vault items)" do
+        expect(knife_ssh).to receive(:run)
+        expect(knife.client_builder).to receive(:run)
+        expect(knife.chef_vault_handler).to receive(:run).with(node_name: knife.config[:chef_node_name])
+        knife.run
+      end
+
+      it "raises an exception if the config[:chef_node_name] is not present" do
+        knife.config[:chef_node_name] = nil
+
+        expect { knife.run }.to raise_error(SystemExit)
+      end
     end
 
-    it "raises the exception if config[:ssh_password] is set and an authentication exception is raised" do
-      knife.config[:ssh_password] = "password"
-      expect(knife_ssh).to receive(:run).and_raise(Net::SSH::AuthenticationFailed)
-      expect { knife.run }.to raise_error(Net::SSH::AuthenticationFailed)
+    context "when the validation_key is nil" do
+      before do
+        # this tests runs the old code path where we have a validation key, so we need to pass that check for some plugins
+        Chef::Config[:validation_key] = nil
+      end
+
+      it "creates the client and does not run client_builder or the chef_vault_handler" do
+        expect(knife_ssh).to receive(:run)
+        expect(knife.client_builder).not_to receive(:run)
+        expect(knife.chef_vault_handler).not_to receive(:run)
+        knife.run
+      end
     end
   end
 

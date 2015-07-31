@@ -29,7 +29,7 @@ describe Chef::Resource::File do
   end
 
   it "should have a default action of 'create'" do
-    expect(@resource.action).to eql("create")
+    expect(@resource.action).to eql([:create])
   end
 
   it "should have a default content of nil" do
@@ -64,6 +64,20 @@ describe Chef::Resource::File do
     expect { @resource.action :delete }.not_to raise_error
     expect { @resource.action :touch }.not_to raise_error
     expect { @resource.action :blues }.to raise_error(ArgumentError)
+  end
+
+  it "should accept a block, symbol, or string for verify" do
+    expect {@resource.verify {}}.not_to raise_error
+    expect {@resource.verify ""}.not_to raise_error
+    expect {@resource.verify :json}.not_to raise_error
+    expect {@resource.verify true}.to raise_error
+    expect {@resource.verify false}.to raise_error
+  end
+
+  it "should accept multiple verify statements" do
+    @resource.verify "foo"
+    @resource.verify "bar"
+    @resource.verify.length == 2
   end
 
   it "should use the object name as the path by default" do

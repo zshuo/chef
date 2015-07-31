@@ -165,7 +165,7 @@ describe Chef::Knife::Ssh do
 
       it "uses the ssh_attribute" do
         @knife.run
-        expect(@knife.config[:attribute]).to eq("ec2.public_hostname")
+        expect(@knife.get_ssh_attribute(Chef::Node.new)).to eq("ec2.public_hostname")
       end
     end
 
@@ -177,7 +177,7 @@ describe Chef::Knife::Ssh do
 
       it "uses the default" do
         @knife.run
-        expect(@knife.config[:attribute]).to eq("fqdn")
+        expect(@knife.get_ssh_attribute(Chef::Node.new)).to eq("fqdn")
       end
     end
 
@@ -260,7 +260,7 @@ describe Chef::Knife::Ssh do
     Chef::Config[:client_key] = nil
     Chef::Config[:chef_server_url] = 'http://localhost:9000'
 
-    @api.get("/search/node?q=*:*&sort=X_CHEF_id_CHEF_X%20asc&start=0&rows=1000", 200) {
+    @api.get("/search/node?q=*:*&sort=X_CHEF_id_CHEF_X%20asc&start=0", 200) {
       %({"total":1, "start":0, "rows":[{"name":"i-xxxxxxxx", "json_class":"Chef::Node", "automatic":{"fqdn":"the.fqdn", "ec2":{"public_hostname":"the_public_hostname"}},"recipes":[]}]})
     }
   end

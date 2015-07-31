@@ -27,11 +27,11 @@ class Chef
 
       state_attrs :minute, :hour, :day, :month, :weekday, :user
 
+      default_action :create
+      allowed_actions :create, :delete
+
       def initialize(name, run_context=nil)
         super
-        @resource_name = :cron
-        @action = :create
-        @allowed_actions.push(:create, :delete)
         @minute = "*"
         @hour = "*"
         @day = "*"
@@ -138,7 +138,7 @@ class Chef
           :kind_of => [String, Symbol]
         )
       end
-      
+
       def time(arg=nil)
         set_or_return(
           :time,
@@ -214,5 +214,3 @@ class Chef
     end
   end
 end
-
-

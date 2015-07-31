@@ -47,17 +47,17 @@ class Chef
 
             # Otherwise look up the path to the ports directory using 'whereis'
             else
-              whereis = shell_out!("whereis -s #{port}", :env => nil)
-              unless _path = whereis.stdout[/^#{Regexp.escape(port)}:\s+(.+)$/, 1]
+              whereis = shell_out_with_timeout!("whereis -s #{port}", :env => nil)
+              unless path = whereis.stdout[/^#{Regexp.escape(port)}:\s+(.+)$/, 1]
                 raise Chef::Exceptions::Package, "Could not find port with the name #{port}"
               end
-              _path
+              path
             end
           end
 
           def makefile_variable_value(variable, dir = nil)
             options = dir ? { :cwd => dir } : {}
-            make_v = shell_out!("make -V #{variable}", options.merge!(:env => nil, :returns => [0,1]))
+            make_v = shell_out_with_timeout!("make -V #{variable}", options.merge!(:env => nil, :returns => [0,1]))
             make_v.exitstatus.zero? ? make_v.stdout.strip.split($\).first : nil   # $\ is the line separator, i.e. newline.
           end
         end

@@ -32,14 +32,7 @@ require 'rubygems/version'
 require 'rubygems/dependency'
 require 'rubygems/spec_fetcher'
 require 'rubygems/platform'
-
-# Compatibility note: Rubygems 2.0 removes rubygems/format in favor of
-# rubygems/package.
-begin
-  require 'rubygems/format'
-rescue LoadError
-  require 'rubygems/package'
-end
+require 'rubygems/package'
 require 'rubygems/dependency_installer'
 require 'rubygems/uninstaller'
 require 'rubygems/specification'
@@ -380,8 +373,13 @@ class Chef
             # Opscode Omnibus - The ruby that ships inside omnibus is only used for Chef
             # Default to installing somewhere more functional
             if new_resource.options && new_resource.options.kind_of?(Hash)
-              msg = "options should be a string instead of a hash\n"
-              msg << "in #{new_resource} from #{new_resource.source_line}"
+              msg = [
+                "Gem options must be passed to gem_package as a string instead of a hash when",
+                "using this installation of Chef because it runs with its own packaged Ruby. A hash",
+                "may only be used when installing a gem to the same Ruby installation that Chef is",
+                "running under.  See https://docs.chef.io/resource_gem_package.html for more information.",
+                "Error raised at #{new_resource} from #{new_resource.source_line}",
+              ].join("\n")
               raise ArgumentError, msg
             end
             gem_location = find_gem_by_path
@@ -484,7 +482,7 @@ class Chef
 
         def candidate_version
           @candidate_version ||= begin
-            if target_version_already_installed?
+            if target_version_already_installed?(@current_resource.version, @new_resource.version)
               nil
             elsif source_is_remote?
               @gem_env.candidate_version_from_remote(gem_dependency, *gem_sources).to_s
@@ -494,12 +492,11 @@ class Chef
           end
         end
 
-        def target_version_already_installed?
-          return false unless @current_resource && @current_resource.version
-          return false if @current_resource.version.nil?
-          return false if @new_resource.version.nil?
+        def target_version_already_installed?(current_version, new_version)
+          return false unless current_version
+          return false if new_version.nil?
 
-          Gem::Requirement.new(@new_resource.version).satisfied_by?(Gem::Version.new(@current_resource.version))
+          Gem::Requirement.new(new_version).satisfied_by?(Gem::Version.new(current_version))
         end
 
         ##
@@ -534,13 +531,16 @@ class Chef
         def install_via_gem_command(name, version)
           if @new_resource.source =~ /\.gem$/i
             name = @new_resource.source
+          elsif @new_resource.clear_sources
+            src = ' --clear-sources'
+            src << (@new_resource.source && " --source=#{@new_resource.source}" || '')
           else
-            src = @new_resource.source && "  --source=#{@new_resource.source} --source=https://rubygems.org"
+            src = @new_resource.source && " --source=#{@new_resource.source} --source=https://rubygems.org"
           end
           if !version.nil? && version.length > 0
-            shell_out!("#{gem_binary_path} install #{name} -q --no-rdoc --no-ri -v \"#{version}\"#{src}#{opts}", :env=>nil)
+            shell_out_with_timeout!("#{gem_binary_path} install #{name} -q --no-rdoc --no-ri -v \"#{version}\"#{src}#{opts}", :env=>nil)
           else
-            shell_out!("#{gem_binary_path} install \"#{name}\" -q --no-rdoc --no-ri #{src}#{opts}", :env=>nil)
+            shell_out_with_timeout!("#{gem_binary_path} install \"#{name}\" -q --no-rdoc --no-ri #{src}#{opts}", :env=>nil)
           end
         end
 
@@ -564,9 +564,9 @@ class Chef
 
         def uninstall_via_gem_command(name, version)
           if version
-            shell_out!("#{gem_binary_path} uninstall #{name} -q -x -I -v \"#{version}\"#{opts}", :env=>nil)
+            shell_out_with_timeout!("#{gem_binary_path} uninstall #{name} -q -x -I -v \"#{version}\"#{opts}", :env=>nil)
           else
-            shell_out!("#{gem_binary_path} uninstall #{name} -q -x -I -a#{opts}", :env=>nil)
+            shell_out_with_timeout!("#{gem_binary_path} uninstall #{name} -q -x -I -a#{opts}", :env=>nil)
           end
         end
 

@@ -30,7 +30,9 @@ class Chef
       #
       class BootstrapContext
 
-        def initialize(config, run_list, chef_config, secret)
+        attr_accessor :client_pem
+
+        def initialize(config, run_list, chef_config, secret = nil)
           @config       = config
           @run_list     = run_list
           @chef_config  = chef_config
@@ -42,13 +44,19 @@ class Chef
         end
 
         def validation_key
-          IO.read(File.expand_path(@chef_config[:validation_key]))
+          if File.exist?(File.expand_path(@chef_config[:validation_key]))
+            IO.read(File.expand_path(@chef_config[:validation_key]))
+          else
+            false
+          end
         end
 
         def encrypted_data_bag_secret
           @secret
         end
 
+        # Contains commands and content, see trusted_certs_content
+        # TODO: Rename to trusted_certs_script
         def trusted_certs
           @trusted_certs ||= trusted_certs_content
         end
@@ -159,6 +167,9 @@ CONFIG
         end
 
         private
+       
+        # Returns a string for copying the trusted certificates on the workstation to the system being bootstrapped
+        # This string should contain both the commands necessary to both create the files, as well as their content
         def trusted_certs_content
           content = ""
           if @chef_config[:trusted_certs_dir]

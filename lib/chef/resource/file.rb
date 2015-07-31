@@ -20,6 +20,7 @@
 require 'chef/resource'
 require 'chef/platform/query_helpers'
 require 'chef/mixin/securable'
+require 'chef/resource/file/verification'
 
 class Chef
   class Resource
@@ -37,19 +38,27 @@ class Chef
 
       attr_writer :checksum
 
-      provides :file
+      #
+      # The checksum of the rendered file.  This has to be saved on the
+      # new_resource for the 'after' state for reporting but we cannot
+      # mutate the new_resource.checksum which would change the
+      # user intent in the new_resource if the resource is reused.
+      #
+      # @returns [String] Checksum of the file we actually rendered
+      attr_accessor :final_checksum
+
+      default_action :create
+      allowed_actions :create, :delete, :touch, :create_if_missing
 
       def initialize(name, run_context=nil)
         super
-        @resource_name = :file
         @path = name
         @backup = 5
-        @action = "create"
-        @allowed_actions.push(:create, :delete, :touch, :create_if_missing)
         @atomic_update = Chef::Config[:file_atomic_update]
         @force_unlink = false
         @manage_symlink_source = nil
         @diff = nil
+        @verifications = []
       end
 
       def content(arg=nil)
@@ -114,6 +123,27 @@ class Chef
           arg,
           :kind_of => [ TrueClass, FalseClass ]
         )
+      end
+
+      def verify(command=nil, opts={}, &block)
+        if ! (command.nil? || [String, Symbol].include?(command.class))
+          raise ArgumentError, "verify requires either a string, symbol, or a block"
+        end
+
+        if command || block_given?
+          @verifications << Verification.new(self, command, opts, &block)
+        else
+          @verifications
+        end
+      end
+
+      def state_for_resource_reporter
+        state_attrs = super()
+        # fix up checksum state with final_checksum saved by the provider
+        if checksum.nil? && final_checksum
+          state_attrs[:checksum] = final_checksum
+        end
+        state_attrs
       end
     end
   end

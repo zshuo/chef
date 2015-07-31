@@ -17,11 +17,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+require 'chef-config/exceptions'
+
 class Chef
   # == Chef::Exceptions
   # Chef's custom exceptions are all contained within the Chef::Exceptions
   # namespace.
   class Exceptions
+
+    ConfigurationError = ChefConfig::ConfigurationError
 
     # Backcompat with Chef::ShellOut code:
     require 'mixlib/shellout/exceptions'
@@ -45,6 +49,7 @@ class Chef
     class FileNotFound < RuntimeError; end
     class Package < RuntimeError; end
     class Service < RuntimeError; end
+    class Script < RuntimeError; end
     class Route < RuntimeError; end
     class SearchIndex < RuntimeError; end
     class Override < RuntimeError; end
@@ -67,11 +72,17 @@ class Chef
     class DuplicateRole < RuntimeError; end
     class ValidationFailed < ArgumentError; end
     class InvalidPrivateKey < ArgumentError; end
-    class ConfigurationError < ArgumentError; end
+    class MissingKeyAttribute < ArgumentError; end
+    class KeyCommandInputError < ArgumentError; end
+    class InvalidKeyArgument < ArgumentError; end
+    class InvalidKeyAttribute < ArgumentError; end
+    class InvalidUserAttribute < ArgumentError; end
+    class InvalidClientAttribute < ArgumentError; end
     class RedirectLimitExceeded < RuntimeError; end
     class AmbiguousRunlistSpecification < ArgumentError; end
     class CookbookFrozen < ArgumentError; end
     class CookbookNotFound < RuntimeError; end
+    class OnlyApiVersion0SupportedForAction < RuntimeError; end
     # Cookbook loader used to raise an argument error when cookbook not found.
     # for back compat, need to raise an error that inherits from ArgumentError
     class CookbookNotFoundInRepo < ArgumentError; end
@@ -89,6 +100,11 @@ class Chef
     class ConflictingMembersInGroup < ArgumentError; end
     class InvalidResourceReference < RuntimeError; end
     class ResourceNotFound < RuntimeError; end
+    class ProviderNotFound < RuntimeError; end
+    NoProviderAvailable = ProviderNotFound
+    class VerificationNotFound < RuntimeError; end
+    class InvalidEventType < ArgumentError; end
+    class MultipleIdentityError < RuntimeError; end
 
     # Can't find a Resource of this type that is valid on this platform.
     class NoSuchResourceType < NameError
@@ -123,6 +139,7 @@ class Chef
     class DuplicateDataBagItem < RuntimeError; end
 
     class PowershellCmdletException < RuntimeError; end
+    class LCMParser < RuntimeError; end
 
     class CannotDetermineHomebrewOwner < Package; end
 
@@ -149,6 +166,15 @@ class Chef
     class IllegalVersionConstraint < NotImplementedError; end
 
     class MetadataNotValid < StandardError; end
+    class MetadataNotFound < StandardError
+      attr_reader :install_path
+      attr_reader :cookbook_name
+      def initialize(install_path, cookbook_name)
+        @install_path = install_path
+        @cookbook_name = cookbook_name
+        super "No metadata.rb or metadata.json found for cookbook #{@cookbook_name} in #{@install_path}"
+      end
+    end
 
     # File operation attempted but no permissions to perform it
     class InsufficientPermissions < RuntimeError; end
@@ -199,7 +225,11 @@ class Chef
 
     class ChildConvergeError < RuntimeError; end
 
-    class NoProviderAvailable < RuntimeError; end
+    class DeprecatedFeatureError < RuntimeError;
+      def initalize(message)
+        super("#{message} (raising error due to treat_deprecation_warnings_as_errors being set)")
+      end
+    end
 
     class MissingRole < RuntimeError
       NULL = Object.new
@@ -376,6 +406,67 @@ class Chef
     class AmbiguousProviderResolution < RuntimeError
       def initialize(resource, classes)
         super "Found more than one provider for #{resource.resource_name} resource: #{classes}"
+      end
+    end
+
+    class AuditControlGroupDuplicate < RuntimeError
+      def initialize(name)
+        super "Control group with name '#{name}' has already been defined"
+      end
+    end
+    class AuditNameMissing < RuntimeError; end
+    class NoAuditsProvided < RuntimeError
+      def initialize
+        super "You must provide a block with controls"
+      end
+    end
+    class AuditsFailed < RuntimeError
+      def initialize(num_failed, num_total)
+        super "Audit phase found failures - #{num_failed}/#{num_total} controls failed"
+      end
+    end
+
+    # If a converge or audit fails, we want to wrap the output from those errors into 1 error so we can
+    # see both issues in the output.  It is possible that nil will be provided.  You must call `fill_backtrace`
+    # to correctly populate the backtrace with the wrapped backtraces.
+    class RunFailedWrappingError < RuntimeError
+      attr_reader :wrapped_errors
+      def initialize(*errors)
+        errors = errors.select {|e| !e.nil?}
+        output = "Found #{errors.size} errors, they are stored in the backtrace"
+        @wrapped_errors = errors
+        super output
+      end
+
+      def fill_backtrace
+        backtrace = []
+        wrapped_errors.each_with_index do |e,i|
+          backtrace << "#{i+1}) #{e.class} -  #{e.message}"
+          backtrace += e.backtrace if e.backtrace
+          backtrace << "" unless i == wrapped_errors.length - 1
+        end
+        set_backtrace(backtrace)
+      end
+    end
+
+    class PIDFileLockfileMatch < RuntimeError
+      def initialize
+        super "PID file and lockfile are not permitted to match. Specify a different location with --pid or --lockfile"
+      end
+    end
+
+    class MultipleDscResourcesFound < RuntimeError
+      attr_reader :resources_found
+      def initialize(resources_found)
+        @resources_found = resources_found
+        matches_info = @resources_found.each do |r|
+          if r['Module'].nil?
+            "Resource #{r['Name']} was found in #{r['Module']['Name']}"
+          else
+            "Resource #{r['Name']} is a binary resource"
+          end
+        end
+        super "Found multiple matching resources. #{matches_info.join("\n")}"
       end
     end
   end

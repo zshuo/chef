@@ -147,7 +147,7 @@ class Chef
                 # some scripts support multiple instances through symlinks such as openvpn.
                 # We should get the service name from rcvar.
                 Chef::Log.debug("name=\"service\" not found at #{init_command}. falling back to rcvar")
-                sn = shell_out!("#{init_command} rcvar").stdout[/(\w+_enable)=/, 1]
+                shell_out!("#{init_command} rcvar").stdout[/(\w+_enable)=/, 1]
               else
                 # for why-run mode when the rcd_script is not there yet
                 new_resource.service_name
@@ -180,7 +180,7 @@ class Chef
         def set_service_enable(value)
           lines = read_rc_conf
           # Remove line that set the old value
-          lines.delete_if { |line| line =~ /^#{Regexp.escape(service_enable_variable_name)}=/ }
+          lines.delete_if { |line| line =~ /^\#?\s*#{Regexp.escape(service_enable_variable_name)}=/ }
           # And append the line that sets the new value at the end
           lines << "#{service_enable_variable_name}=\"#{value}\""
           write_rc_conf(lines)

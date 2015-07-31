@@ -32,6 +32,7 @@ end
 
 metadata = { :unix_only => true,
   :requires_root => true,
+  :not_supported_on_mac_osx => true,
   :provider => {:user => user_provider_for_platform}
 }
 
@@ -64,8 +65,12 @@ describe Chef::Provider::User::Useradd, metadata do
     end
   end
 
-  def supports_quote_in_username?
-    OHAI_SYSTEM["platform_family"] == "debian"
+  def self.quote_in_username_unsupported?
+    if OHAI_SYSTEM["platform_family"] == "debian"
+      false
+    else
+      "Only debian family systems support quotes in username"
+    end
   end
 
   def password_should_be_set
@@ -76,18 +81,44 @@ describe Chef::Provider::User::Useradd, metadata do
     end
   end
 
+  def try_cleanup
+    ['/home/cheftestfoo', '/home/cheftestbar'].each do |f|
+      FileUtils.rm_rf(f) if File.exists? f
+    end
+
+    ['cf-test'].each do |u|
+      r = Chef::Resource::User.new("DELETE USER", run_context)
+      r.username('cf-test')
+      r.run_action(:remove)
+    end
+  end
+
   before do
     # Silence shell_out live stream
     Chef::Log.level = :warn
+    try_cleanup
   end
 
   after do
-    begin
-      pw_entry # will raise if the user doesn't exist
-      shell_out!("userdel", "-r", username, :returns => [0,12])
-    rescue UserNotFound
-      # nothing to remove
+    max_retries = 3
+    while max_retries > 0
+      begin
+        pw_entry # will raise if the user doesn't exist
+        status = shell_out!("userdel", "-r", username, :returns => [0,8,12])
+
+        # Error code 8 during userdel indicates that the user is logged in.
+        # This occurs randomly because the accounts daemon holds a lock due to which userdel fails.
+        # The work around is to retry userdel for 3 times.
+        break if status.exitstatus != 8
+
+        sleep 1
+        max_retries = max_retries - 1
+      rescue UserNotFound
+        break
+      end
     end
+
+    status.error! if max_retries == 0
   end
 
   let(:node) do
@@ -135,15 +166,10 @@ describe Chef::Provider::User::Useradd, metadata do
     end
   end
 
-  let(:skip) { false }
-
   describe "action :create" do
 
     context "when the user does not exist beforehand" do
       before do
-        if reason = skip
-          pending(reason)
-        end
         user_resource.run_action(:create)
         expect(user_resource).to be_updated_by_last_action
       end
@@ -159,14 +185,7 @@ describe Chef::Provider::User::Useradd, metadata do
       #  tabulation: '\t', etc.). Note that using a slash ('/') may break the
       #  default algorithm for the definition of the user's home directory.
 
-      context "and the username contains a single quote" do
-        let(:skip) do
-          if supports_quote_in_username?
-            false
-          else
-            "Platform #{OHAI_SYSTEM["platform"]} not expected to support username w/ quote"
-          end
-        end
+      context "and the username contains a single quote", skip: quote_in_username_unsupported? do
 
         let(:username) { "t'bilisi" }
 
@@ -315,7 +334,7 @@ describe Chef::Provider::User::Useradd, metadata do
 
       before do
         if reason = skip
-          pending(reason)
+          skip(reason)
         end
         existing_user.run_action(:create)
         expect(existing_user).to be_updated_by_last_action
@@ -373,18 +392,18 @@ describe Chef::Provider::User::Useradd, metadata do
       end
 
       context "and home directory is updated" do
-        let(:existing_home) { "/home/foo" }
-        let(:home) { "/home/bar" }
+        let(:existing_home) { "/home/cheftestfoo" }
+        let(:home) { "/home/cheftestbar" }
         it "ensures the home directory is set to the desired value" do
-          expect(pw_entry.home).to eq("/home/bar")
+          expect(pw_entry.home).to eq("/home/cheftestbar")
         end
 
         context "and manage_home is enabled" do
           let(:existing_manage_home) { true }
           let(:manage_home) { true }
           it "moves the home directory to the new location" do
-            expect(File).not_to exist("/home/foo")
-            expect(File).to exist("/home/bar")
+            expect(File).not_to exist("/home/cheftestfoo")
+            expect(File).to exist("/home/cheftestbar")
           end
         end
 
@@ -396,19 +415,19 @@ describe Chef::Provider::User::Useradd, metadata do
             # Inconsistent behavior. See: CHEF-2205
             it "created the home dir b/c of CHEF-2205 so it still exists" do
               # This behavior seems contrary to expectation and non-convergent.
-              expect(File).not_to exist("/home/foo")
-              expect(File).to exist("/home/bar")
+              expect(File).not_to exist("/home/cheftestfoo")
+              expect(File).to exist("/home/cheftestbar")
             end
           elsif ohai[:platform] == "aix"
             it "creates the home dir in the desired location" do
-              expect(File).not_to exist("/home/foo")
-              expect(File).to exist("/home/bar")
+              expect(File).not_to exist("/home/cheftestfoo")
+              expect(File).to exist("/home/cheftestbar")
             end
           else
             it "does not create the home dir in the desired location (XXX)" do
               # This behavior seems contrary to expectation and non-convergent.
-              expect(File).not_to exist("/home/foo")
-              expect(File).not_to exist("/home/bar")
+              expect(File).not_to exist("/home/cheftestfoo")
+              expect(File).not_to exist("/home/cheftestbar")
             end
           end
         end
@@ -419,8 +438,8 @@ describe Chef::Provider::User::Useradd, metadata do
 
           it "leaves the old home directory around (XXX)" do
             # Would it be better to remove the old home?
-            expect(File).to exist("/home/foo")
-            expect(File).not_to exist("/home/bar")
+            expect(File).to exist("/home/cheftestfoo")
+            expect(File).not_to exist("/home/cheftestbar")
           end
         end
       end
@@ -508,7 +527,7 @@ describe Chef::Provider::User::Useradd, metadata do
 
     def aix_user_lock_status
       lock_info = shell_out!("lsuser -a account_locked #{username}")
-      status = /\S+\s+account_locked=(\S+)/.match(lock_info.stdout)[1]
+      /\S+\s+account_locked=(\S+)/.match(lock_info.stdout)[1]
     end
 
     def user_account_should_be_locked

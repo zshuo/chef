@@ -24,6 +24,8 @@ require 'chef/dsl/platform_introspection'
 require 'chef/dsl/include_recipe'
 require 'chef/dsl/registry_helper'
 require 'chef/dsl/reboot_pending'
+require 'chef/dsl/audit'
+require 'chef/dsl/powershell'
 
 require 'chef/mixin/from_file'
 
@@ -34,12 +36,7 @@ class Chef
   # A Recipe object is the context in which Chef recipes are evaluated.
   class Recipe
 
-    include Chef::DSL::DataQuery
-    include Chef::DSL::PlatformIntrospection
-    include Chef::DSL::IncludeRecipe
-    include Chef::DSL::Recipe
-    include Chef::DSL::RegistryHelper
-    include Chef::DSL::RebootPending
+    include Chef::DSL::Recipe::FullDSL
 
     include Chef::Mixin::FromFile
     include Chef::Mixin::Deprecation
@@ -52,12 +49,16 @@ class Chef
     # For example:
     #   "aws::elastic_ip" returns [:aws, "elastic_ip"]
     #   "aws" returns [:aws, "default"]
+    #   "::elastic_ip" returns [ current_cookbook, "elastic_ip" ]
     #--
     # TODO: Duplicates functionality of RunListItem
-    def self.parse_recipe_name(recipe_name)
-      rmatch = recipe_name.match(/(.+?)::(.+)/)
-      if rmatch
-        [ rmatch[1].to_sym, rmatch[2] ]
+    def self.parse_recipe_name(recipe_name, current_cookbook: nil)
+      case recipe_name
+      when /(.+?)::(.+)/
+        [ $1.to_sym, $2 ]
+      when /^::(.+)/
+        raise "current_cookbook is nil, cannot resolve #{recipe_name}" if current_cookbook.nil?
+        [ current_cookbook.to_sym, $1 ]
       else
         [ recipe_name.to_sym, "default" ]
       end

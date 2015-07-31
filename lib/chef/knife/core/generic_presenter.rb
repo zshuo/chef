@@ -178,10 +178,13 @@ class Chef
           nested_value_spec.split(".").each do |attr|
             if data.nil?
               nil # don't get no method error on nil
+            # Must check :[] before attr because spec can include
+            #   `keys` - want the key named `keys`, not a list of
+            #   available keys.
+            elsif data.respond_to?(:[])  && data.has_key?(attr)
+              data = data[attr]
             elsif data.respond_to?(attr.to_sym)
               data = data.send(attr.to_sym)
-            elsif data.respond_to?(:[])
-              data = data[attr]
             else
               data = begin
                 data.send(attr.to_sym)

@@ -5,7 +5,7 @@ describe "LWRPs with inline resources" do
   include IntegrationSupport
   include Chef::Mixin::ShellOut
 
-  let(:chef_dir) { File.join(File.dirname(__FILE__), "..", "..", "..", "bin") }
+  let(:chef_dir) { File.expand_path("../../../../bin", __FILE__) }
 
   # Invoke `chef-client` as `ruby PATH/TO/chef-client`. This ensures the
   # following constraints are satisfied:
@@ -16,7 +16,7 @@ describe "LWRPs with inline resources" do
   # machine that has omnibus chef installed. In that case we need to ensure
   # we're running `chef-client` from the source tree and not the external one.
   # cf. CHEF-4914
-  let(:chef_client) { "ruby '#{chef_dir}/chef-client'" }
+  let(:chef_client) { "ruby '#{chef_dir}/chef-client' --minimal-ohai" }
 
   when_the_repository "has a cookbook with a nested LWRP" do
     before do

@@ -30,6 +30,7 @@ class Chef
     def initialize(url = Chef::Config[:chef_server_url], options = {})
       options[:client_name] ||= Chef::Config[:node_name]
       options[:signing_key_filename] ||= Chef::Config[:client_key]
+      options[:signing_key_filename] = nil if chef_zero_uri?(url)
       super(url, options)
     end
 
@@ -41,3 +42,5 @@ class Chef
     use Chef::HTTP::RemoteRequestID
   end
 end
+
+require 'chef/config'

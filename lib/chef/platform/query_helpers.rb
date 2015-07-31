@@ -21,34 +21,36 @@ class Chef
 
     class << self
       def windows?
-        if RUBY_PLATFORM =~ /mswin|mingw|windows/
-          true
-        else
-          false
-        end
+        ChefConfig.windows?
       end
 
       def windows_server_2003?
+        # WMI startup shouldn't be performed unless we're on Windows.
         return false unless windows?
         require 'wmi-lite/wmi'
-
-        # CHEF-4888: Work around ruby #2618, expected to be fixed in Ruby 2.1.0
-        # https://github.com/ruby/ruby/commit/588504b20f5cc880ad51827b93e571e32446e5db
-        # https://github.com/ruby/ruby/commit/27ed294c7134c0de582007af3c915a635a6506cd
-        WIN32OLE.ole_initialize
 
         wmi = WmiLite::Wmi.new
         host = wmi.first_of('Win32_OperatingSystem')
         is_server_2003 = (host['version'] && host['version'].start_with?("5.2"))
 
-        WIN32OLE.ole_uninitialize
-
         is_server_2003
+      end
+
+      def supports_powershell_execution_bypass?(node)
+        node[:languages] && node[:languages][:powershell] &&
+          node[:languages][:powershell][:version].to_i >= 3
       end
 
       def supports_dsc?(node)
         node[:languages] && node[:languages][:powershell] &&
           node[:languages][:powershell][:version].to_i >= 4
+      end
+
+      def supports_dsc_invoke_resource?(node)
+        require 'rubygems'
+        supports_dsc?(node) &&
+          Gem::Version.new(node[:languages][:powershell][:version]) >=
+            Gem::Version.new("5.0.10018.0")
       end
     end
   end

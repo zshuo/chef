@@ -21,18 +21,15 @@ require 'uri'
 require 'chef/resource/file'
 require 'chef/provider/remote_file'
 require 'chef/mixin/securable'
+require 'chef/mixin/uris'
 
 class Chef
   class Resource
     class RemoteFile < Chef::Resource::File
       include Chef::Mixin::Securable
 
-      provides :remote_file
-
       def initialize(name, run_context=nil)
         super
-        @resource_name = :remote_file
-        @action = "create"
         @source = []
         @use_etag = true
         @use_last_modified = true
@@ -125,11 +122,9 @@ class Chef
         )
       end
 
-      def after_created
-        validate_source(@source)
-      end
-
       private
+
+      include Chef::Mixin::Uris
 
       def validate_source(source)
         source = Array(source).flatten
@@ -144,7 +139,7 @@ class Chef
       end
 
       def absolute_uri?(source)
-        source.kind_of?(String) and URI.parse(source).absolute?
+        Chef::Provider::RemoteFile::Fetcher.network_share?(source) or (source.kind_of?(String) and as_uri(source).absolute?)
       rescue URI::InvalidURIError
         false
       end
